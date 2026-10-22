@@ -139,6 +139,7 @@ var Calc = (function () {
     SOURCES.forEach(function (s, i) { cols.push({ key: 'src:' + s, label: srcLabels[i], kind: 'value' }); });
     cols.push(
       { key: 'admitted', label: 'Admitted: total', kind: 'value' },
+      { key: 'asPlanned', label: 'As planned', kind: 'value' },
       { key: 'beforePlan', label: 'Before plan', kind: 'value' },
       { key: 'discharged', label: 'Discharged: total', kind: 'value' },
       { key: 'extended', label: 'Stays extended today', kind: 'value' },
@@ -191,7 +192,7 @@ var Calc = (function () {
     SOURCES.forEach(function (s) { v['src:' + s] = 0; });
     cats.forEach(function (c) { v['occ:' + c.name] = 0; v['adm:' + c.name] = 0; v['oos:' + c.name] = 0; });
     blocksOf(cats).forEach(function (b) { v['oosBlock:' + b] = 0; });
-    v.admitted = v.beforePlan = v.discharged = v.extended = v.inHousePatients = 0;
+    v.admitted = v.asPlanned = v.beforePlan = v.discharged = v.extended = v.inHousePatients = 0;
     v.dischargesConfirmed = v.plannedWalkIn = v.plannedVirtual = v.plannedOther = v.walkInVisits = 0;
     v.plan = plan && plan[d] !== undefined && plan[d] !== '' ? Number(plan[d]) : '';
 
@@ -223,6 +224,8 @@ var Calc = (function () {
         if (v['src:' + p.source] !== undefined) v['src:' + p.source]++;
         else v['src:' + SOURCES[4]]++;
         if (cat) v['adm:' + cat.name]++;
+        // Bookings admitted on their planned date, or earlier than planned.
+        if (p.plannedAdmission === d) v.asPlanned++;
         if (p.plannedAdmission && p.plannedAdmission > d) v.beforePlan++;
       }
       if (counted && p.discharge === d) v.discharged++;

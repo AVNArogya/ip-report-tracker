@@ -22,9 +22,9 @@ test('room categories match the room list', () => {
 
 test('columns start with the report layout', () => {
   const labels = Calc.columns(cats).map(c => c.label);
-  assert.deepStrictEqual(labels.slice(0, 32), [
+  assert.deepStrictEqual(labels.slice(0, 33), [
     'Date', 'Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)',
-    'Admitted: total', 'Before plan', 'Discharged: total', 'Stays extended today', 'Patients in house (end of day)',
+    'Admitted: total', 'As planned', 'Before plan', 'Discharged: total', 'Stays extended today', 'Patients in house (end of day)',
     'Plan: patients in house (KR)', 'Economy (of 12)', 'Executive JF (of 7)', 'Executive S (of 24)', 'Deluxe (of 2)',
     'Classic villa (of 6)', 'Deluxe villa (of 4)', 'Royal villa (of 1)', 'J block', 'S block', 'SW block',
     'In-house rooms occupied', 'In-house rooms vacant and available', 'In-house occupancy',
@@ -96,6 +96,10 @@ test('sharing, extensions, planned discharges and bookings', () => {
   assert.strictEqual(v.plannedOther, 1);
   assert.strictEqual(v.walkInVisits, 2); // the visit and the walk-in admitted that day
   assert.strictEqual(v.beforePlan, 1);
+  assert.strictEqual(v.asPlanned, 0);
+  const onDate = Calc.day('2026-10-06', cats, [admit('7', 'J 4', '2026-10-06', { plannedAdmission: '2026-10-06' })], [], {});
+  assert.strictEqual(onDate.asPlanned, 1);
+  assert.strictEqual(onDate.beforePlan, 0);
   assert.strictEqual(v.plan, 55.5);
 });
 

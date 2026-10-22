@@ -28,6 +28,7 @@ Edit a room list and everything follows: totals, the "(of N)" headings, availabl
 |---|---|
 | Walk-in (PCE), Virtual (tele), Corporate, Clinic referral, Other | admissions that day, by the patient's source |
 | Admitted: total | admissions that day |
+| As planned | admitted that day, on their planned admission date (bookings) |
 | Before plan | admitted that day, earlier than their planned admission date |
 | Discharged: total | patients whose **actual** discharge date is that day |
 | Stays extended today | stays extended that day (Extend in the app) |
