@@ -650,8 +650,12 @@ function fieldIndex_(fields, key) {
 
 /* ---------- reading ---------- */
 
+// Bumped with each backend change; the app warns when the sheet's code is older than it expects.
+var BACKEND_VERSION = 3;
+
 function readAll_() {
   return {
+    version: BACKEND_VERSION,
     categories: readCategories_(),
     patients: readRows_(PATIENTS, PATIENT_FIELDS).map(function (p) {
       p.extensions = String(p.extensions || '').split(',').map(Calc.toIso).filter(function (x) { return x; });

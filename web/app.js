@@ -99,8 +99,22 @@
     return d;
   }
 
+  var BACKEND_VERSION = 3; // the Apps Script version this app needs
+
+  // Rooms by category. Older sheet code sent a one-row-per-room tab as many empty categories; regroup those here.
+  function categoriesFrom(cats) {
+    if (!cats || !cats.length) return Calc.defaultCategories();
+    var rooms = cats.reduce(function (a, c) { return a + (c.rooms || []).length; }, 0);
+    if (rooms) return cats;
+    return Calc.parseCategories(cats.map(function (c) { return [c.name, c.short, '', '', '']; }));
+  }
+
   function apply(data) {
-    state.categories = data.categories && data.categories.length ? data.categories : Calc.defaultCategories();
+    if (!DEMO && !(data.version >= BACKEND_VERSION)) {
+      status('The Google Sheet is running old code, so saving may fail. In the sheet: Extensions → Apps Script → paste the latest ' +
+        'backend/Code-all-in-one.gs from GitHub → Save → Deploy → Manage deployments → Edit → New version → Deploy.', 'error');
+    }
+    state.categories = categoriesFrom(data.categories);
     state.patients = data.patients || [];
     state.blocks = data.blocks || [];
     state.plan = data.plan || {};
@@ -473,5 +487,5 @@
   resetForm();
   renderAll();
   status('Loading…');
-  load().then(function (d) { apply(d); resetForm(); status(''); }).catch(function (e) { status('Could not load the sheet: ' + e.message, 'error'); });
+  load().then(function (d) { apply(d); resetForm(); if (DEMO || d.version >= BACKEND_VERSION) status(''); }).catch(function (e) { status('Could not load the sheet: ' + e.message, 'error'); });
 })();
