@@ -124,12 +124,12 @@ assert.strictEqual(asha.category, 'Economy');
 res = post('savePatient', Object.assign({}, asha, { discharge: '2026-10-22' }));
 assert.ok(res.ok, res.error);
 
-// Report rows: 20, 21, 22 Oct.
+// Report rows: 30 Sep (opening balance) to 22 Oct.
 const keys = {};
 for (let c = 1; c <= report.getLastColumn(); c++) keys[report.get(5, c)] = c;
-const row = iso => 7 + ['2026-10-20', '2026-10-21', '2026-10-22'].indexOf(iso);
+const row = iso => 7 + Math.round((Date.parse(iso) - Date.parse('2026-09-30')) / 864e5); // first row: the 30 Sep opening balance
 const val = (iso, key) => report.get(row(iso), keys[key]);
-assert.strictEqual(report.getLastRow(), 9);
+assert.strictEqual(report.getLastRow(), 29);
 assert.strictEqual(report.get(6, keys['occ:Economy']), 'Economy (of 12)');
 assert.strictEqual(val('2026-10-20', 'admitted'), 1);
 assert.strictEqual(val('2026-10-20', 'src:Walk-in (PCE)'), 1);
@@ -156,6 +156,19 @@ assert.strictEqual(val('2026-10-22', 'plan'), 61);
 const ravi = post('savePlan', { date: '2026-10-23', plan: '' }).data.patients.find(p => p.name === 'Ravi');
 assert.ok(post('deletePatient', { id: ravi.id }).ok);
 assert.strictEqual(val('2026-10-21', 'admitted'), 0);
+
+// Opening balance saved in one go: two patients carried forward, sharing room 102.
+res = post('savePatients', { save: [
+  { type: 'admission', admission: '2026-09-30', room: '102', name: 'Old one', share: true },
+  { type: 'admission', admission: '2026-09-30', room: '102', share: true }
+], remove: [] });
+assert.ok(res.ok, res.error);
+assert.strictEqual(val('2026-09-30', 'inHousePatients'), 2);
+assert.strictEqual(val('2026-09-30', 'totalOccupied'), 1);
+assert.strictEqual(val('2026-09-30', 'admitted'), 0);
+assert.strictEqual(val('2026-10-21', 'inHousePatients'), 3);
+const bad = post('savePatients', { save: [{ type: 'admission', admission: '2026-09-30', room: '102', share: true }], remove: [] });
+assert.ok(!bad.ok && /two patients/.test(bad.error), 'a third patient in a room is refused');
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

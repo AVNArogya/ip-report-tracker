@@ -20,6 +20,12 @@ var Calc = (function () {
 
   var SOURCES = ['Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)'];
   var WALK_IN = SOURCES[0];
+
+  // Patients already in house at the end of this date are entered once, as the opening balance
+  // (admission date on or before it). The report starts with this date as its "brought forward" row,
+  // and admissions, discharges and other day counts start the day after.
+  var OPENING_DATE = '2026-09-30';
+  function isCarried(p) { return p.type === 'admission' && !!p.admission && p.admission <= OPENING_DATE; }
   var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission' };
 
   // Room Categories tab as it is first set up: [category, short name, block, location, rooms].
@@ -170,24 +176,25 @@ var Calc = (function () {
     v.plan = plan && plan[d] !== undefined && plan[d] !== '' ? Number(plan[d]) : '';
 
     var inRoom = {}; // room → patients in house tonight
+    var counted = d > OPENING_DATE; // the brought-forward row shows who is in house, not the day's movements
     patients.forEach(function (p) {
       var cat = idx.byRoom[p.room];
-      if (p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
+      if (counted && p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
       if (p.type !== 'admission' && p.plannedAdmission === tomorrow) {
         if (p.source === WALK_IN) v.plannedWalkIn++;
         else if (p.source === SOURCES[1]) v.plannedVirtual++;
         else v.plannedOther++;
       }
       if (!isAdmitted(p)) return;
-      if (p.admission === d) {
+      if (counted && p.admission === d) {
         v.admitted++;
         if (v['src:' + p.source] !== undefined) v['src:' + p.source]++;
         else v['src:' + SOURCES[4]]++;
         if (cat) v['adm:' + cat.name]++;
         if (p.plannedAdmission && p.plannedAdmission > d) v.beforePlan++;
       }
-      if (p.discharge === d) v.discharged++;
-      if ((p.extensions || []).indexOf(d) >= 0) v.extended++;
+      if (counted && p.discharge === d) v.discharged++;
+      if (counted && (p.extensions || []).indexOf(d) >= 0) v.extended++;
       if (inHouseOn(p, d)) {
         v.inHousePatients++;
         (inRoom[p.room] = inRoom[p.room] || []).push(p);
@@ -231,7 +238,7 @@ var Calc = (function () {
     return v;
   }
 
-  // The report's date range: from the first date entered to today, or to the latest date entered.
+  // The report's date range: from the opening balance date to today, or to the latest date entered.
   function reportRange(patients, blocks, today) {
     var first = null, last = today;
     function see(x) {
@@ -246,8 +253,7 @@ var Calc = (function () {
     });
     (blocks || []).forEach(function (b) { see(b.from); });
     if (!first) return null;
-    if (first > today) first = today;
-    return { from: first, to: last };
+    return { from: OPENING_DATE, to: last };
   }
 
   // The whole report: { columns, dates, days: [values by key] }. Empty until something is entered.
@@ -308,8 +314,12 @@ var Calc = (function () {
       share: !!input.share
     };
     var errors = [];
+    var carried = isCarried(p);
+    // The opening balance only needs the room; name and source are optional there.
+    if (carried && !p.name) p.name = 'Carried forward (' + p.room + ')';
     if (!p.name) errors.push('Enter the patient name.');
-    if (!p.source) errors.push('Choose the source.');
+    if (!p.source && !carried) errors.push('Choose the source.');
+    if (carried && p.discharge && p.discharge <= OPENING_DATE) errors.push('Room ' + p.room + ': a patient carried forward is discharged after ' + OPENING_DATE + '.');
     if (!p.type) errors.push('Choose walk-in visit, booking or admission.');
     if (p.type === 'visit' && !p.visitDate) errors.push('Enter the visit date.');
     if (p.type === 'booking' && !p.plannedAdmission) errors.push('Enter the planned admission date.');
@@ -340,6 +350,24 @@ var Calc = (function () {
     return { patient: p, errors: errors };
   }
 
+  // Several patients saved together (the opening balance). Checks each one against the others and the
+  // rest of the batch; returns { saved, removed, errors }. Nothing should be written if errors is not empty.
+  function checkBatch(saves, removeIds, patients, cats, blocks) {
+    var removed = removeIds || [];
+    var list = patients.filter(function (p) { return removed.indexOf(p.id) < 0; });
+    var saved = [], errors = [];
+    (saves || []).forEach(function (input, i) {
+      var key = input.id || 'new' + i;
+      var res = checkPatient(input, list.filter(function (p) { return (p.id || p._key) !== key; }), cats, blocks);
+      res.errors.forEach(function (e) { errors.push((input.room ? 'Room ' + input.room + ': ' : '') + e); });
+      res.patient._key = key;
+      list = list.filter(function (p) { return (p.id || p._key) !== key; }).concat(res.patient);
+      saved.push(res.patient);
+    });
+    saved.forEach(function (p) { delete p._key; });
+    return { saved: saved, removed: removed, errors: errors };
+  }
+
   function checkBlock(input, cats) {
     var idx = roomIndex(cats);
     var b = { id: input.id || '', room: roomName(input.room), from: toIso(input.from), until: toIso(input.until), reason: String(input.reason || '').trim() };
@@ -351,11 +379,11 @@ var Calc = (function () {
   }
 
   return {
-    SOURCES: SOURCES, TYPES: TYPES, DEFAULT_CATEGORIES: DEFAULT_CATEGORIES,
+    SOURCES: SOURCES, TYPES: TYPES, DEFAULT_CATEGORIES: DEFAULT_CATEGORIES, OPENING_DATE: OPENING_DATE, isCarried: isCarried,
     addDays: addDays, datesBetween: datesBetween, toIso: toIso, splitRooms: splitRooms, isInHouse: isInHouse,
     parseCategories: parseCategories, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
     columns: columns, day: day, report: report, reportRange: reportRange, roomBoard: roomBoard,
-    inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBlock: checkBlock
+    inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBatch: checkBatch, checkBlock: checkBlock
   };
 })();
 
@@ -484,6 +512,7 @@ function doPost(e) {
       var d = readAll_();
       var saved = null;
       if (body.action === 'savePatient') saved = savePatient_(d, body.record);
+      else if (body.action === 'savePatients') saved = savePatients_(d, body.record);
       else if (body.action === 'deletePatient') deleteRow_(PATIENTS, body.record.id);
       else if (body.action === 'saveBlock') saved = saveBlock_(d, body.record);
       else if (body.action === 'deleteBlock') deleteRow_(BLOCKS, body.record.id);
@@ -524,6 +553,19 @@ function savePatient_(d, input) {
   p.category = cat ? cat.name : '';
   p.extensions = p.extensions.join(', ');
   return writeRow_(PATIENTS, PATIENT_FIELDS, p);
+}
+
+// The opening balance: { save: [patients], remove: [ids] }, checked together and written only if all are valid.
+function savePatients_(d, input) {
+  var res = Calc.checkBatch(input.save, input.remove, d.patients, d.categories, d.blocks);
+  if (res.errors.length) throw new Error(res.errors.join(' '));
+  var byRoom = Calc.roomIndex(d.categories).byRoom;
+  res.removed.forEach(function (id) { deleteRow_(PATIENTS, id); });
+  return res.saved.map(function (p) {
+    p.category = byRoom[p.room] ? byRoom[p.room].name : '';
+    p.extensions = p.extensions.join(', ');
+    return writeRow_(PATIENTS, PATIENT_FIELDS, p);
+  });
 }
 
 function saveBlock_(d, input) {

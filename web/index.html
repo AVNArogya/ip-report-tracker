@@ -18,6 +18,7 @@
       <button data-tab="patients">Patients</button>
       <button data-tab="rooms">Rooms</button>
       <button data-tab="report">Report</button>
+      <button data-tab="opening">Opening balance</button>
     </nav>
   </header>
   <div id="status" class="status" hidden></div>
@@ -93,6 +94,19 @@
       <div class="table-wrap"><table id="cat-table" class="list"></table></div>
       <h3 id="month-title"></h3>
       <div class="table-wrap"><table id="month-table" class="report"></table></div>
+    </section>
+
+    <!-- Opening balance: patients already in house at the end of the opening date -->
+    <section id="tab-opening" class="tab" hidden>
+      <div class="card">
+        <h2>Opening balance: in house at the end of <span id="opening-date"></span></h2>
+        <p class="hint">Set how many patients are in each room. Names and planned discharges are optional, but adding them lets you discharge
+          each patient by name later. From the next day on, the report adds admissions and takes away discharges.
+          Patients already discharged are kept and shown in grey.</p>
+        <div id="opening-count" class="cards"></div>
+        <div class="table-wrap"><table id="opening-table" class="list"></table></div>
+        <div class="actions"><button class="primary" id="opening-save">Save opening balance</button></div>
+      </div>
     </section>
   </main>
 

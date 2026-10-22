@@ -22,7 +22,7 @@ Edit a room list and everything follows: totals, the "(of N)" headings, availabl
 ### IP Report
 - **Row 1:** pick a date in **C1** (blank = today).
 - **Rows 2–3:** summary for that date: total rooms (from Room Categories), occupied, available, out of service, walk-ins, admitted, discharged, patients in house and occupancy.
-- **Row 6 onwards:** one row per date, from the first entry to today (or the latest date entered), in the report's column order:
+- **Row 6 onwards:** one row per date, from **30 Sep 2026** (the opening balance, "brought forward") to today, or to the latest date entered, in the report's column order:
 
 | Column | Calculated as (for each date) |
 |---|---|
@@ -44,6 +44,13 @@ Edit a room list and everything follows: totals, the "(of N)" headings, availabl
 Columns after these: walk-in visits (including people not admitted), **total rooms** (formula from Room Categories), total occupied, total out of service, **total available** (formula), then **admitted by category** and **out of service by category**.
 
 Formula columns are shaded grey and linked to Room Categories, so the total room count is fixed by that tab.
+
+## Opening balance (patients already in house on 30 Sep)
+On 30 Sep 2026, **49 patients** were in house in **47 of the 64 rooms**. Enter them once on the app's **Opening balance** screen: set 1 or 2 patients for each occupied room, optionally with names and planned discharges. The counter at the top should show 49 patients, 47 rooms occupied and 17 available.
+
+- The **30 Sep** row is the brought-forward position: patients in house, occupied and available rooms, and category occupancy. These patients are **not** counted as admissions.
+- From **1 Oct**, every count starts from that position: admissions add, discharges take away. Discharge a carried-forward patient from **Patients** like anyone else.
+- The date is `OPENING_DATE` in `web/calc.js`.
 
 ## Day to day, in the app
 | Screen | What you do |

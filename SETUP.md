@@ -17,6 +17,10 @@
 10. **Deploy → New deployment →** type **Web app**. *Execute as*: **Me**. *Who has access*: **Anyone**. Click **Deploy** and copy the URL that ends in `/exec`.
 11. In GitHub, edit `web/config.js`: set `API_URL` to that URL and `APP_KEY` to the same phrase. Commit. GitHub Pages republishes the app in about a minute.
 
+## D. Enter the opening balance (30 Sep)
+12. In the app, open **Opening balance**. For each room occupied on 30 Sep, set the number of patients (2 for a shared room), and add names if you have them. Check the counter shows **49 patients, 47 rooms occupied, 17 available**, then click **Save opening balance**.
+13. The IP Report now starts at the 30 Sep row, showing 49 in house and 47 rooms occupied. Every day from 1 Oct is calculated from there.
+
 ## Check it works
 1. In the app, add an **Admission**: today, room J 1, planned discharge in 3 days.
 2. In the sheet's **IP Report**, today's row shows *Walk-in (PCE)* 1, *Admitted: total* 1, *Economy (of 12)* 1 and *Total rooms available* 63. **Room Categories** shows Economy occupied 1, available 11.

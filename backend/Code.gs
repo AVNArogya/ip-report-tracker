@@ -120,6 +120,7 @@ function doPost(e) {
       var d = readAll_();
       var saved = null;
       if (body.action === 'savePatient') saved = savePatient_(d, body.record);
+      else if (body.action === 'savePatients') saved = savePatients_(d, body.record);
       else if (body.action === 'deletePatient') deleteRow_(PATIENTS, body.record.id);
       else if (body.action === 'saveBlock') saved = saveBlock_(d, body.record);
       else if (body.action === 'deleteBlock') deleteRow_(BLOCKS, body.record.id);
@@ -160,6 +161,19 @@ function savePatient_(d, input) {
   p.category = cat ? cat.name : '';
   p.extensions = p.extensions.join(', ');
   return writeRow_(PATIENTS, PATIENT_FIELDS, p);
+}
+
+// The opening balance: { save: [patients], remove: [ids] }, checked together and written only if all are valid.
+function savePatients_(d, input) {
+  var res = Calc.checkBatch(input.save, input.remove, d.patients, d.categories, d.blocks);
+  if (res.errors.length) throw new Error(res.errors.join(' '));
+  var byRoom = Calc.roomIndex(d.categories).byRoom;
+  res.removed.forEach(function (id) { deleteRow_(PATIENTS, id); });
+  return res.saved.map(function (p) {
+    p.category = byRoom[p.room] ? byRoom[p.room].name : '';
+    p.extensions = p.extensions.join(', ');
+    return writeRow_(PATIENTS, PATIENT_FIELDS, p);
+  });
 }
 
 function saveBlock_(d, input) {

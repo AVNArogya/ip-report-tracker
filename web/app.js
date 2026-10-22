@@ -81,6 +81,16 @@
       saved.category = catOf(saved.room);
       if (!saved.id) { saved.id = id(); d.patients.push(saved); }
       else d.patients = d.patients.map(function (p) { return p.id === saved.id ? saved : p; });
+    } else if (action === 'savePatients') {
+      var rp = Calc.checkBatch(rec.save, rec.remove, d.patients, d.categories, d.blocks);
+      if (rp.errors.length) throw new Error(rp.errors.join(' '));
+      d.patients = d.patients.filter(function (p) { return rp.removed.indexOf(p.id) < 0; });
+      saved = rp.saved.map(function (p) {
+        p.category = catOf(p.room);
+        if (!p.id) { p.id = id(); d.patients.push(p); }
+        else d.patients = d.patients.map(function (x) { return x.id === p.id ? p : x; });
+        return p;
+      });
     } else if (action === 'deletePatient') {
       d.patients = d.patients.filter(function (p) { return p.id !== rec.id; });
     } else if (action === 'saveBlock') {
@@ -124,7 +134,7 @@
   }
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
 
-  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); }
+  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderOpening(); }
 
   /* ---------- entry form ---------- */
 
@@ -458,6 +468,71 @@
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     a.download = 'IP Report ' + renderReport.month + '.csv';
     a.click();
+  });
+
+  /* ---------- opening balance ---------- */
+
+  var OPEN = Calc.OPENING_DATE;
+  $('#opening-date').textContent = fmtDate(OPEN);
+
+  function carriedIn(room) {
+    return state.patients.filter(function (p) { return Calc.isCarried(p) && p.room === room; });
+  }
+  // One row per room: patients (0–2), a name for each, and a planned discharge.
+  // Patients already discharged can't be removed here; they stay in the count.
+  function renderOpening() {
+    var rows = state.categories.map(function (c) {
+      return '<tr class="cat-row"><td colspan="4"><b>' + esc(c.name) + '</b> <small>(' + c.rooms.length + ' rooms)</small></td></tr>' +
+        c.rooms.map(function (room) {
+          var here = carriedIn(room);
+          var fixed = here.filter(function (p) { return p.discharge; }).length;
+          var opts = [0, 1, 2].filter(function (n) { return n >= fixed; }).map(function (n) {
+            return '<option' + (n === here.length ? ' selected' : '') + '>' + n + '</option>';
+          }).join('');
+          var names = [0, 1].map(function (i) {
+            var p = here[i];
+            var lock = p && p.discharge;
+            return '<input data-i="' + i + '" placeholder="Name (optional)" value="' + esc(p && !/^Carried forward/.test(p.name) ? p.name : '') + '"' +
+              (lock ? ' disabled title="Discharged ' + esc(p.discharge) + '"' : '') + (i >= here.length ? ' hidden' : '') + '>';
+          }).join('');
+          var plan = here.filter(function (p) { return !p.discharge; })[0] || here[0];
+          return '<tr data-room="' + esc(room) + '"><td><b>' + esc(room) + '</b></td><td><select class="n">' + opts + '</select></td>' +
+            '<td class="names">' + names + '</td><td><input type="date" class="pd" value="' + esc(plan && plan.plannedDischarge || '') + '"></td></tr>';
+        }).join('');
+    }).join('');
+    $('#opening-table').innerHTML = '<thead><tr><th>Room</th><th>Patients</th><th>Names</th><th>Planned discharge</th></tr></thead><tbody>' + rows + '</tbody>';
+    countOpening();
+  }
+  function countOpening() {
+    var patients = 0, rooms = 0;
+    $$('#opening-table tr[data-room]').forEach(function (tr) {
+      var n = +$('.n', tr).value;
+      patients += n;
+      if (n) rooms++;
+      $$('.names input', tr).forEach(function (inp) { inp.hidden = +inp.dataset.i >= n; });
+    });
+    var total = Calc.roomIndex(state.categories).total;
+    $('#opening-count').innerHTML = [['Patients in house', patients], ['Rooms occupied', rooms], ['Total rooms', total], ['Rooms available', total - rooms]]
+      .map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('');
+  }
+  $('#opening-table').addEventListener('change', function (e) { if (e.target.classList.contains('n')) countOpening(); });
+
+  $('#opening-save').addEventListener('click', function () {
+    var toSave = [], remove = [];
+    $$('#opening-table tr[data-room]').forEach(function (tr) {
+      var room = tr.dataset.room, n = +$('.n', tr).value, pd = $('.pd', tr).value;
+      var here = carriedIn(room);
+      for (var i = 0; i < Math.max(n, here.length); i++) {
+        var p = here[i];
+        if (i >= n) { if (p && !p.discharge) remove.push(p.id); continue; }
+        if (p && p.discharge) continue; // already discharged: leave as it is
+        var name = $('.names input[data-i="' + i + '"]', tr).value.trim();
+        toSave.push(Object.assign({ type: 'admission', admission: OPEN, visitDate: OPEN, source: '', extensions: [] }, p || {}, {
+          room: room, name: name, plannedDischarge: pd, share: n > 1
+        }));
+      }
+    });
+    save('savePatients', { save: toSave, remove: remove }, 'Opening balance saved. The report now starts from ' + short(OPEN) + '.');
   });
 
   /* ---------- start ---------- */
