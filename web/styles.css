@@ -68,7 +68,3 @@ dialog h3 { margin-top: 0; }
   nav { margin-left: 0; width: 100%; }
   nav button { flex: 1; padding: 6px 4px; }
 }
-tr.cat-row td { background: var(--blue-l); }
-td.names { display: flex; gap: 6px; flex-wrap: wrap; }
-td.names input { flex: 1; min-width: 140px; }
-#opening-table td { vertical-align: middle; }

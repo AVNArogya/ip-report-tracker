@@ -46,24 +46,25 @@ test('admission, occupancy and discharge by date', () => {
   assert.strictEqual(d10['adm:Economy'], 1);
   assert.strictEqual(d10['adm:Executive (S block)'], 1);
   assert.strictEqual(d10['occ:Economy'], 1);
-  assert.strictEqual(d10.inHouseOccupied, 2);
-  assert.strictEqual(d10.inHouseAvailable, 54);
-  assert.strictEqual(d10.totalOccupied, 2);
-  assert.strictEqual(d10.totalAvailable, 62);
+  // Every total includes the 49 patients in 47 rooms from 30 Sep.
+  assert.strictEqual(d10.inHouseOccupied, 49);
+  assert.strictEqual(d10.inHouseAvailable, 7);
+  assert.strictEqual(d10.totalOccupied, 49);
+  assert.strictEqual(d10.totalAvailable, 15);
 
   const d11 = Calc.day('2026-10-11', cats, patients, [], {});
   assert.strictEqual(d11.admitted, 1);
   assert.strictEqual(d11['occ:Apartment rooms'], 1);
-  assert.strictEqual(d11.inHouseOccupied, 2);
-  assert.strictEqual(d11.totalOccupied, 3);
+  assert.strictEqual(d11.inHouseOccupied, 49);
+  assert.strictEqual(d11.totalOccupied, 50);
   assert.strictEqual(d11.dischargesConfirmed, 0);
 
   // Discharged on the 12th, the day before the planned 13th: counted on the 12th only.
   const d12 = Calc.day('2026-10-12', cats, patients, [], {});
   assert.strictEqual(d12.discharged, 1);
   assert.strictEqual(d12['occ:Economy'], 0);
-  assert.strictEqual(d12.inHousePatients, 2);
-  assert.strictEqual(d12.totalAvailable, 62);
+  assert.strictEqual(d12.inHousePatients, 51);
+  assert.strictEqual(d12.totalAvailable, 15);
   assert.strictEqual(Calc.day('2026-10-13', cats, patients, [], {}).discharged, 0);
 });
 
@@ -71,8 +72,8 @@ test('same-day admission and discharge', () => {
   const v = Calc.day('2026-10-05', cats, [admit('1', 'J 2', '2026-10-05', { discharge: '2026-10-05' })], [], {});
   assert.strictEqual(v.admitted, 1);
   assert.strictEqual(v.discharged, 1);
-  assert.strictEqual(v.inHousePatients, 0);
-  assert.strictEqual(v.totalOccupied, 0);
+  assert.strictEqual(v.inHousePatients, 49);
+  assert.strictEqual(v.totalOccupied, 47);
 });
 
 test('sharing, extensions, planned discharges and bookings', () => {
@@ -87,8 +88,8 @@ test('sharing, extensions, planned discharges and bookings', () => {
   const v = Calc.day('2026-10-03', cats, patients, [], { '2026-10-03': 55.5 });
   assert.strictEqual(v.sharing, 2);
   assert.strictEqual(v['occ:Classic villa'], 1);
-  assert.strictEqual(v.inHousePatients, 3);
-  assert.strictEqual(v.totalOccupied, 2);
+  assert.strictEqual(v.inHousePatients, 52);
+  assert.strictEqual(v.totalOccupied, 49);
   assert.strictEqual(v.extended, 1);
   assert.strictEqual(v.dischargesConfirmed, 2);
   assert.strictEqual(v.plannedVirtual, 1);
@@ -104,18 +105,20 @@ test('out of service rooms by block', () => {
   assert.strictEqual(v['oosBlock:J'], 1);
   assert.strictEqual(v['oosBlock:SW'], 1);
   assert.strictEqual(v['oos:Hotel rooms'], 1);
-  assert.strictEqual(v.inHouseAvailable, 54);
+  assert.strictEqual(v.inHouseAvailable, 7);
   assert.strictEqual(v.totalOutOfService, 3);
-  assert.strictEqual(v.totalAvailable, 61);
+  assert.strictEqual(v.totalAvailable, 14);
   assert.strictEqual(Calc.day('2026-10-03', cats, [], blocks, {})['oosBlock:J'], 0);
 });
 
-test('report runs from the opening date to today', () => {
-  assert.deepStrictEqual(Calc.report(cats, [], [], {}, '2026-10-22').dates, []);
+test('report runs from 30 Sep to today', () => {
+  const empty = Calc.report(cats, [], [], {}, '2026-10-22');
+  assert.strictEqual(empty.dates.length, 23);
+  assert.strictEqual(empty.days[0].inHousePatients, 49);
   const r = Calc.report(cats, [admit('1', 'J 1', '2026-10-20', { discharge: '2026-10-25' })], [], {}, '2026-10-22');
-  assert.strictEqual(r.dates[0], '2026-09-30'); // starts at the opening balance
+  assert.strictEqual(r.dates[0], '2026-09-30');
   assert.strictEqual(r.dates[r.dates.length - 1], '2026-10-25');
-  assert.strictEqual(r.days[22].inHousePatients, 1);
+  assert.strictEqual(r.days[22].inHousePatients, 50);
 });
 
 test('checkPatient catches double booking and allows sharing', () => {
@@ -141,35 +144,35 @@ test('toIso reads dates', () => {
   assert.strictEqual(Calc.toIso(''), null);
 });
 
-test('opening balance: 49 patients in 47 rooms carried forward from 30 Sep', () => {
-  const all = Calc.roomIndex(cats);
-  const rooms = Object.keys(all.byRoom).filter(r => !['131', '132', '137', '138', '139', '140', '1', '2'].includes(r)).slice(0, 47);
-  const save = rooms.map(room => ({ type: 'admission', admission: '2026-09-30', room, source: '', share: ['J 1', 'J 2'].includes(room) }));
-  save.push({ type: 'admission', admission: '2026-09-30', room: 'J 1', share: true }, { type: 'admission', admission: '2026-09-30', room: 'J 2', share: true });
-  const batch = Calc.checkBatch(save, [], [], cats, []);
-  assert.deepStrictEqual(batch.errors, []);
-  assert.strictEqual(batch.saved.find(p => p.room === 'J 1').name, 'Carried forward (J 1)');
-  const patients = batch.saved.map((p, i) => Object.assign(p, { id: 'c' + i }));
-
-  const sep30 = Calc.day('2026-09-30', cats, patients, [], {});
+test('fixed 30 Sep position: 49 patients in 47 rooms, entries from 1 Oct', () => {
+  const sep30 = Calc.day('2026-09-30', cats, [], [], {});
   assert.strictEqual(sep30.inHousePatients, 49);
   assert.strictEqual(sep30.totalOccupied, 47);
+  assert.strictEqual(sep30.totalRooms, 64);
   assert.strictEqual(sep30.totalAvailable, 17);
-  assert.strictEqual(sep30.sharing, 4);
-  assert.strictEqual(sep30.admitted, 0, 'carried-forward patients are not admissions');
+  assert.strictEqual(sep30.admitted, 0);
 
-  // 1 Oct: one admission to a free room, one carried-forward patient discharged.
-  patients.push({ id: 'n1', name: 'New', source: WALK, type: 'admission', visitDate: '2026-10-01', admission: '2026-10-01', room: '131', extensions: [] });
-  patients[5].discharge = '2026-10-01';
+  const patients = [
+    admit('1', '131', '2026-10-01'),
+    // Two of the 49 leave on 2 Oct: one frees a room, the other was sharing so the room stays occupied.
+    { id: 'c1', type: 'carried', name: 'A', discharge: '2026-10-02', room: 'J 5', roomFreed: 'Yes' },
+    { id: 'c2', type: 'carried', name: 'B', discharge: '2026-10-02', roomFreed: 'No' }
+  ];
   const oct1 = Calc.day('2026-10-01', cats, patients, [], {});
   assert.strictEqual(oct1.admitted, 1);
-  assert.strictEqual(oct1.discharged, 1);
-  assert.strictEqual(oct1.inHousePatients, 49);
-  assert.strictEqual(oct1.totalOccupied, 47);
-  assert.strictEqual(oct1['occ:Apartment rooms'], 1);
-  assert.strictEqual(Calc.report(cats, patients, [], {}, '2026-10-22').dates[0], '2026-09-30');
+  assert.strictEqual(oct1.inHousePatients, 50);
+  assert.strictEqual(oct1.totalOccupied, 48);
+  assert.strictEqual(oct1.totalAvailable, 16);
+  const oct2 = Calc.day('2026-10-02', cats, patients, [], {});
+  assert.strictEqual(oct2.discharged, 2);
+  assert.strictEqual(oct2.inHousePatients, 48);
+  assert.strictEqual(oct2.totalOccupied, 47);
+  assert.strictEqual(oct2.inHouseOccupied, 46);
+  assert.strictEqual(oct2.totalAvailable, 17);
 
-  // A second patient in an occupied room without "sharing" is refused.
-  const clash = Calc.checkBatch([{ type: 'admission', admission: '2026-09-30', room: rooms[10] }], [], patients, cats, []);
-  assert.match(clash.errors.join(' '), /occupied/);
+  assert.match(Calc.checkPatient({ name: 'X', source: WALK, type: 'admission', admission: '2026-09-29', room: 'J 1' }, [], cats, []).errors.join(' '), /starting figures/);
+  const c = Calc.checkPatient({ type: 'carried', discharge: '2026-10-05', roomFreed: true }, [], cats, []);
+  assert.deepStrictEqual(c.errors, []);
+  assert.strictEqual(c.patient.roomFreed, 'Yes');
+  assert.match(Calc.checkPatient({ type: 'carried', discharge: '2026-09-30' }, [], cats, []).errors.join(' '), /after/);
 });

@@ -7,9 +7,9 @@
  *
  * Records:
  *   category { name, short, block, location: 'In-house'|'Apartment'|'Hotel', rooms: ['J 1', ...] }
- *   patient  { id, name, phone, source, type: 'visit'|'booking'|'admission', visitDate,
+ *   patient  { id, name, phone, source, type: 'visit'|'booking'|'admission'|'carried', visitDate,
  *              plannedAdmission, admission, room, plannedDischarge, extensions: ['yyyy-mm-dd'],
- *              discharge, notes }
+ *              discharge, roomFreed ('Yes'|'No', carried only), notes }
  *   block    { id, room, from, until, reason }   (room out of service; until blank = open-ended)
  *   plan     { 'yyyy-mm-dd': number }            (KR: planned patients in house)
  */
@@ -19,12 +19,14 @@ var Calc = (function () {
   var SOURCES = ['Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)'];
   var WALK_IN = SOURCES[0];
 
-  // Patients already in house at the end of this date are entered once, as the opening balance
-  // (admission date on or before it). The report starts with this date as its "brought forward" row,
-  // and admissions, discharges and other day counts start the day after.
-  var OPENING_DATE = '2026-09-30';
-  function isCarried(p) { return p.type === 'admission' && !!p.admission && p.admission <= OPENING_DATE; }
-  var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission' };
+  // Position at the end of 30 Sep, fixed: 49 patients in 47 of the 64 rooms (taken as in-house rooms).
+  // The report starts with this row; from 1 Oct, entries add admissions and take away discharges.
+  // A patient who was already in on 30 Sep is discharged with a 'carried' entry (no admission).
+  var OPENING = { date: '2026-09-30', patients: 49, rooms: 47 };
+  var OPENING_DATE = OPENING.date;
+  var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission', carried: 'Discharge (admitted before 1 Oct)' };
+  function isCarried(p) { return p.type === 'carried' && !!p.discharge; }
+  function yes(v) { return v === true || /^(yes|true|y|1)$/i.test(String(v || '').trim()); }
 
   // Room Categories tab as it is first set up: [category, short name, block, location, rooms].
   var DEFAULT_CATEGORIES = [
@@ -174,9 +176,21 @@ var Calc = (function () {
     v.plan = plan && plan[d] !== undefined && plan[d] !== '' ? Number(plan[d]) : '';
 
     var inRoom = {}; // room → patients in house tonight
-    var counted = d > OPENING_DATE; // the brought-forward row shows who is in house, not the day's movements
+    var counted = d > OPENING_DATE; // the 30 Sep row shows the fixed position, not the day's movements
+    var carriedOut = 0, carriedFreed = 0, carriedFreedInHouse = 0;
     patients.forEach(function (p) {
       var cat = idx.byRoom[p.room];
+      if (isCarried(p)) {
+        if (counted && p.discharge === d) v.discharged++;
+        if (p.discharge <= d) {
+          carriedOut++;
+          if (yes(p.roomFreed)) {
+            carriedFreed++;
+            if (!cat || isInHouse(cat)) carriedFreedInHouse++;
+          }
+        }
+        return;
+      }
       if (counted && p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
       if (p.type !== 'admission' && p.plannedAdmission === tomorrow) {
         if (p.source === WALK_IN) v.plannedWalkIn++;
@@ -225,6 +239,12 @@ var Calc = (function () {
       }
     });
 
+    // Add the patients and rooms carried forward from 30 Sep who have not been discharged yet.
+    // Their rooms aren't known room by room, so they count in the totals, not in the category columns.
+    v.inHousePatients += OPENING.patients - carriedOut;
+    occInHouse += OPENING.rooms - carriedFreedInHouse;
+    occAll += OPENING.rooms - carriedFreed;
+
     v.inHouseOccupied = occInHouse;
     v.inHouseAvailable = idx.inHouse - occInHouse - oosInHouse;
     v.inHouseOccupancy = idx.inHouse ? occInHouse / idx.inHouse : 0;
@@ -236,28 +256,23 @@ var Calc = (function () {
     return v;
   }
 
-  // The report's date range: from the opening balance date to today, or to the latest date entered.
+  // The report's date range: from 30 Sep (the fixed starting position) to today, or to the latest date entered.
   function reportRange(patients, blocks, today) {
-    var first = null, last = today;
-    function see(x) {
-      if (!x) return;
-      if (!first || x < first) first = x;
-      if (x > last) last = x;
-    }
+    var last = today;
+    function see(x) { if (x && x > last) last = x; }
     patients.forEach(function (p) {
       see(p.visitDate);
-      if (isAdmitted(p)) { see(p.admission); see(p.discharge); }
+      if (isAdmitted(p) || isCarried(p)) { see(p.admission); see(p.discharge); }
       (p.extensions || []).forEach(see);
     });
     (blocks || []).forEach(function (b) { see(b.from); });
-    if (!first) return null;
     return { from: OPENING_DATE, to: last };
   }
 
-  // The whole report: { columns, dates, days: [values by key] }. Empty until something is entered.
+  // The whole report: { columns, dates, days: [values by key] }, from 30 Sep.
   function report(cats, patients, blocks, plan, today) {
     var range = reportRange(patients, blocks, today);
-    var dates = range ? datesBetween(range.from, range.to) : [];
+    var dates = datesBetween(range.from, range.to);
     return {
       columns: columns(cats),
       dates: dates,
@@ -309,20 +324,29 @@ var Calc = (function () {
         .map(toIso).filter(function (x) { return x; }),
       discharge: toIso(input.discharge),
       notes: String(input.notes || '').trim(),
+      roomFreed: input.type === 'carried' ? (yes(input.roomFreed) ? 'Yes' : 'No') : '',
       share: !!input.share
     };
     var errors = [];
-    var carried = isCarried(p);
-    // The opening balance only needs the room; name and source are optional there.
-    if (carried && !p.name) p.name = 'Carried forward (' + p.room + ')';
+    if (!p.type) errors.push('Choose walk-in visit, booking, admission or discharge.');
+    if (p.type === 'carried') {
+      // A patient already in house on 30 Sep leaving: only the discharge date is needed.
+      if (!p.name) p.name = 'Admitted before ' + addDays(OPENING_DATE, 1);
+      if (!p.discharge) errors.push('Enter the discharge date.');
+      else if (p.discharge <= OPENING_DATE) errors.push('The discharge date must be after ' + OPENING_DATE + '; earlier discharges are already in the 30 Sep figures.');
+      if (p.room && !idx.byRoom[p.room]) errors.push('Room ' + p.room + ' is not in the Room Categories tab.');
+      p.admission = null; p.plannedAdmission = null; p.plannedDischarge = null; p.visitDate = null; p.extensions = [];
+      delete p.share;
+      return { patient: p, errors: errors };
+    }
     if (!p.name) errors.push('Enter the patient name.');
-    if (!p.source && !carried) errors.push('Choose the source.');
-    if (carried && p.discharge && p.discharge <= OPENING_DATE) errors.push('Room ' + p.room + ': a patient carried forward is discharged after ' + OPENING_DATE + '.');
-    if (!p.type) errors.push('Choose walk-in visit, booking or admission.');
+    if (!p.source) errors.push('Choose the source.');
     if (p.type === 'visit' && !p.visitDate) errors.push('Enter the visit date.');
     if (p.type === 'booking' && !p.plannedAdmission) errors.push('Enter the planned admission date.');
     if (p.type === 'admission') {
       if (!p.admission) errors.push('Enter the admission date.');
+      else if (p.admission <= OPENING_DATE) errors.push('Patients in house on ' + OPENING_DATE + ' are already in the starting figures (' +
+        OPENING.patients + ' patients, ' + OPENING.rooms + ' rooms). Enter admissions from ' + addDays(OPENING_DATE, 1) + '.');
       if (!p.room) errors.push('Choose a room.');
       else if (!idx.byRoom[p.room]) errors.push('Room ' + p.room + ' is not in the Room Categories tab.');
       if (p.plannedDischarge && p.admission && p.plannedDischarge < p.admission) errors.push('The planned discharge is before the admission date.');
@@ -348,24 +372,6 @@ var Calc = (function () {
     return { patient: p, errors: errors };
   }
 
-  // Several patients saved together (the opening balance). Checks each one against the others and the
-  // rest of the batch; returns { saved, removed, errors }. Nothing should be written if errors is not empty.
-  function checkBatch(saves, removeIds, patients, cats, blocks) {
-    var removed = removeIds || [];
-    var list = patients.filter(function (p) { return removed.indexOf(p.id) < 0; });
-    var saved = [], errors = [];
-    (saves || []).forEach(function (input, i) {
-      var key = input.id || 'new' + i;
-      var res = checkPatient(input, list.filter(function (p) { return (p.id || p._key) !== key; }), cats, blocks);
-      res.errors.forEach(function (e) { errors.push((input.room ? 'Room ' + input.room + ': ' : '') + e); });
-      res.patient._key = key;
-      list = list.filter(function (p) { return (p.id || p._key) !== key; }).concat(res.patient);
-      saved.push(res.patient);
-    });
-    saved.forEach(function (p) { delete p._key; });
-    return { saved: saved, removed: removed, errors: errors };
-  }
-
   function checkBlock(input, cats) {
     var idx = roomIndex(cats);
     var b = { id: input.id || '', room: roomName(input.room), from: toIso(input.from), until: toIso(input.until), reason: String(input.reason || '').trim() };
@@ -377,11 +383,11 @@ var Calc = (function () {
   }
 
   return {
-    SOURCES: SOURCES, TYPES: TYPES, DEFAULT_CATEGORIES: DEFAULT_CATEGORIES, OPENING_DATE: OPENING_DATE, isCarried: isCarried,
+    SOURCES: SOURCES, TYPES: TYPES, DEFAULT_CATEGORIES: DEFAULT_CATEGORIES, OPENING: OPENING, OPENING_DATE: OPENING_DATE, isCarried: isCarried,
     addDays: addDays, datesBetween: datesBetween, toIso: toIso, splitRooms: splitRooms, isInHouse: isInHouse,
     parseCategories: parseCategories, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
     columns: columns, day: day, report: report, reportRange: reportRange, roomBoard: roomBoard,
-    inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBatch: checkBatch, checkBlock: checkBlock
+    inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBlock: checkBlock
   };
 })();
 

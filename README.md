@@ -22,7 +22,7 @@ Edit a room list and everything follows: totals, the "(of N)" headings, availabl
 ### IP Report
 - **Row 1:** pick a date in **C1** (blank = today).
 - **Rows 2–3:** summary for that date: total rooms (from Room Categories), occupied, available, out of service, walk-ins, admitted, discharged, patients in house and occupancy.
-- **Row 6 onwards:** one row per date, from **30 Sep 2026** (the opening balance, "brought forward") to today, or to the latest date entered, in the report's column order:
+- **Row 6 onwards:** one row per date, from **30 Sep 2026** (the fixed starting position) to today, or to the latest date entered, in the report's column order:
 
 | Column | Calculated as (for each date) |
 |---|---|
@@ -45,12 +45,14 @@ Columns after these: walk-in visits (including people not admitted), **total roo
 
 Formula columns are shaded grey and linked to Room Categories, so the total room count is fixed by that tab.
 
-## Opening balance (patients already in house on 30 Sep)
-On 30 Sep 2026, **49 patients** were in house in **47 of the 64 rooms**. Enter them once on the app's **Opening balance** screen: set 1 or 2 patients for each occupied room, optionally with names and planned discharges. The counter at the top should show 49 patients, 47 rooms occupied and 17 available.
+## Starting position on 30 Sep (fixed)
+Up to 30 Sep 2026 the figures are fixed: **49 patients in house, 47 of the 64 rooms occupied, 17 available**. Nothing needs entering for this; the 30 Sep row shows it, and entries start on 1 Oct.
 
-- The **30 Sep** row is the brought-forward position: patients in house, occupied and available rooms, and category occupancy. These patients are **not** counted as admissions.
-- From **1 Oct**, every count starts from that position: admissions add, discharges take away. Discharge a carried-forward patient from **Patients** like anyone else.
-- The date is `OPENING_DATE` in `web/calc.js`.
+- **From 1 Oct**, every admission entered adds to those figures and every discharge takes away from them.
+- When one of the 49 patients from before 1 Oct leaves, enter **New entry → Discharge (admitted before 1 Oct)** with the discharge date. Patients in house go down by 1. Tick *the room is now empty* to also take 1 off the occupied rooms; leave it unticked if the patient was sharing and the room is still occupied. The room and name are optional.
+- The 47 rooms aren't known room by room, so they count in the totals (patients in house, in-house rooms occupied and available, total occupied and available) but not in the per-category columns, which count patients admitted from 1 Oct.
+- Admissions dated before 1 Oct are refused, because they are already in the 49.
+- The figures are `OPENING` in `web/calc.js`.
 
 ## Day to day, in the app
 | Screen | What you do |

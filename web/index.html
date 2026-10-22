@@ -18,7 +18,6 @@
       <button data-tab="patients">Patients</button>
       <button data-tab="rooms">Rooms</button>
       <button data-tab="report">Report</button>
-      <button data-tab="opening">Opening balance</button>
     </nav>
   </header>
   <div id="status" class="status" hidden></div>
@@ -33,19 +32,22 @@
           <label><input type="radio" name="type" value="admission" checked> Admission</label>
           <label><input type="radio" name="type" value="visit"> Walk-in visit (not admitted)</label>
           <label><input type="radio" name="type" value="booking"> Booking (planned admission)</label>
+          <label><input type="radio" name="type" value="carried"> Discharge (admitted before 1 Oct)</label>
         </fieldset>
         <div class="grid">
-          <label>Patient name <input name="name" required></label>
-          <label>Phone <input name="phone" inputmode="tel"></label>
-          <label>Source <select name="source" required></select></label>
+          <label>Patient name <input name="name"></label>
+          <label data-for="visit booking admission">Phone <input name="phone" inputmode="tel"></label>
+          <label data-for="visit booking admission">Source <select name="source"></select></label>
           <label data-for="visit booking">Visit / booking date <input type="date" name="visitDate"></label>
           <label data-for="booking admission">Planned admission <input type="date" name="plannedAdmission"></label>
           <label data-for="admission">Admission date <input type="date" name="admission"></label>
-          <label data-for="admission">Room <select name="room"></select></label>
+          <label data-for="admission carried">Room <select name="room"></select></label>
           <label data-for="booking admission">Planned discharge <input type="date" name="plannedDischarge"></label>
-          <label data-for="admission" class="edit-only">Discharge date <input type="date" name="discharge"></label>
+          <label data-for="admission carried" class="edit-only">Discharge date <input type="date" name="discharge"></label>
           <label data-for="admission" class="edit-only">Stay extended on <input name="extensions" placeholder="yyyy-mm-dd, yyyy-mm-dd"></label>
         </div>
+        <p data-for="carried" class="hint">For a patient who was already in on 30 Sep (one of the 49). Takes 1 off patients in house from the discharge date; the room is optional.</p>
+        <label data-for="carried" class="check"><input type="checkbox" name="roomFreed" checked> The room is now empty (takes 1 off the 47 occupied rooms)</label>
         <label data-for="admission" class="check"><input type="checkbox" name="share"> Sharing a room (a second patient in an occupied room)</label>
         <label>Notes <textarea name="notes" rows="2"></textarea></label>
         <div class="actions">
@@ -96,18 +98,6 @@
       <div class="table-wrap"><table id="month-table" class="report"></table></div>
     </section>
 
-    <!-- Opening balance: patients already in house at the end of the opening date -->
-    <section id="tab-opening" class="tab" hidden>
-      <div class="card">
-        <h2>Opening balance: in house at the end of <span id="opening-date"></span></h2>
-        <p class="hint">Set how many patients are in each room. Names and planned discharges are optional, but adding them lets you discharge
-          each patient by name later. From the next day on, the report adds admissions and takes away discharges.
-          Patients already discharged are kept and shown in grey.</p>
-        <div id="opening-count" class="cards"></div>
-        <div class="table-wrap"><table id="opening-table" class="list"></table></div>
-        <div class="actions"><button class="primary" id="opening-save">Save opening balance</button></div>
-      </div>
-    </section>
   </main>
 
   <dialog id="dlg">

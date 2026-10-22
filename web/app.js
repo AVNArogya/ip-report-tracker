@@ -81,16 +81,6 @@
       saved.category = catOf(saved.room);
       if (!saved.id) { saved.id = id(); d.patients.push(saved); }
       else d.patients = d.patients.map(function (p) { return p.id === saved.id ? saved : p; });
-    } else if (action === 'savePatients') {
-      var rp = Calc.checkBatch(rec.save, rec.remove, d.patients, d.categories, d.blocks);
-      if (rp.errors.length) throw new Error(rp.errors.join(' '));
-      d.patients = d.patients.filter(function (p) { return rp.removed.indexOf(p.id) < 0; });
-      saved = rp.saved.map(function (p) {
-        p.category = catOf(p.room);
-        if (!p.id) { p.id = id(); d.patients.push(p); }
-        else d.patients = d.patients.map(function (x) { return x.id === p.id ? p : x; });
-        return p;
-      });
     } else if (action === 'deletePatient') {
       d.patients = d.patients.filter(function (p) { return p.id !== rec.id; });
     } else if (action === 'saveBlock') {
@@ -134,7 +124,7 @@
   }
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
 
-  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderOpening(); }
+  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); }
 
   /* ---------- entry form ---------- */
 
@@ -145,9 +135,10 @@
   function syncFields() {
     var t = typeNow();
     $$('[data-for]', form).forEach(function (el) {
-      var show = el.dataset.for.split(' ').indexOf(t) >= 0 && (!el.classList.contains('edit-only') || editing);
+      var show = el.dataset.for.split(' ').indexOf(t) >= 0 && (!el.classList.contains('edit-only') || editing || t === 'carried');
       el.hidden = !show;
     });
+    if (t === 'carried' && !form.discharge.value) form.discharge.value = state.today;
     renderRoomOptions();
   }
   $$('input[name=type]', form).forEach(function (r) { r.addEventListener('change', syncFields); });
@@ -193,6 +184,7 @@
     if (p) {
       form.room.value = p.room || '';
       form.share.checked = sharing(p);
+      form.roomFreed.checked = p.type !== 'carried' || /^yes$/i.test(p.roomFreed);
     }
   }
   // True when another patient is in the same room during this patient's stay.
@@ -220,8 +212,12 @@
       // A walk-in or booking admitted later keeps the date they first came; a direct admission uses its admission date.
       rec.visitDate = (editing && editing.visitDate) || rec.admission;
     }
+    if (t === 'carried') {
+      rec.room = form.room.value; rec.discharge = form.discharge.value; rec.roomFreed = form.roomFreed.checked;
+    }
     var wasEditing = !!editing;
-    save('savePatient', rec, wasEditing ? 'Updated ' + rec.name + '.' : 'Saved ' + rec.name + '. The IP Report is updated.').then(function () {
+    var who = rec.name || (t === 'carried' ? 'the discharge' : '');
+    save('savePatient', rec, wasEditing ? 'Updated ' + who + '.' : 'Saved ' + who + '. The IP Report is updated.').then(function () {
       resetForm();
       if (wasEditing) showTab('patients');
     }, function () {});
@@ -294,6 +290,7 @@
   function stateOf(p) {
     if (p.type === 'visit') return 'Walk-in visit';
     if (p.type === 'booking') return 'Booking';
+    if (p.type === 'carried') return 'Discharged';
     if (p.discharge && p.discharge <= state.today) return 'Discharged';
     if (p.admission > state.today) return 'Admission (future)';
     return 'In house';
@@ -314,13 +311,13 @@
     var rows = list.map(function (p) {
       var s = stateOf(p);
       var acts = [];
-      if (p.type !== 'admission') acts.push('<button data-a="admit">Admit</button>');
+      if (p.type === 'visit' || p.type === 'booking') acts.push('<button data-a="admit">Admit</button>');
       if (s === 'In house') acts.push('<button data-a="discharge">Discharge</button>', '<button data-a="extend">Extend</button>');
       acts.push('<button data-a="edit">Edit</button>', '<button data-a="delete" class="danger">Delete</button>');
       return '<tr data-id="' + esc(p.id) + '"><td><b>' + esc(p.name) + '</b><br><small>' + esc(p.phone) + '</small></td>' +
         '<td>' + esc(s) + '</td><td>' + esc(p.source) + '</td>' +
         '<td>' + esc(p.room) + '<br><small>' + esc(catOf(p.room)) + '</small></td>' +
-        '<td>' + (p.type === 'admission' ? 'Admitted ' + short(p.admission) : p.type === 'booking' ? 'Planned ' + short(p.plannedAdmission) : 'Visited ' + short(p.visitDate)) +
+        '<td>' + (p.type === 'admission' ? 'Admitted ' + short(p.admission) : p.type === 'carried' ? 'Admitted before 1 Oct' : p.type === 'booking' ? 'Planned ' + short(p.plannedAdmission) : 'Visited ' + short(p.visitDate)) +
         (p.plannedDischarge ? '<br><small>Planned discharge ' + short(p.plannedDischarge) + '</small>' : '') +
         (p.discharge ? '<br><small>Discharged ' + short(p.discharge) + '</small>' : '') + '</td>' +
         '<td class="acts">' + acts.join('') + '</td></tr>';
@@ -468,71 +465,6 @@
     a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
     a.download = 'IP Report ' + renderReport.month + '.csv';
     a.click();
-  });
-
-  /* ---------- opening balance ---------- */
-
-  var OPEN = Calc.OPENING_DATE;
-  $('#opening-date').textContent = fmtDate(OPEN);
-
-  function carriedIn(room) {
-    return state.patients.filter(function (p) { return Calc.isCarried(p) && p.room === room; });
-  }
-  // One row per room: patients (0–2), a name for each, and a planned discharge.
-  // Patients already discharged can't be removed here; they stay in the count.
-  function renderOpening() {
-    var rows = state.categories.map(function (c) {
-      return '<tr class="cat-row"><td colspan="4"><b>' + esc(c.name) + '</b> <small>(' + c.rooms.length + ' rooms)</small></td></tr>' +
-        c.rooms.map(function (room) {
-          var here = carriedIn(room);
-          var fixed = here.filter(function (p) { return p.discharge; }).length;
-          var opts = [0, 1, 2].filter(function (n) { return n >= fixed; }).map(function (n) {
-            return '<option' + (n === here.length ? ' selected' : '') + '>' + n + '</option>';
-          }).join('');
-          var names = [0, 1].map(function (i) {
-            var p = here[i];
-            var lock = p && p.discharge;
-            return '<input data-i="' + i + '" placeholder="Name (optional)" value="' + esc(p && !/^Carried forward/.test(p.name) ? p.name : '') + '"' +
-              (lock ? ' disabled title="Discharged ' + esc(p.discharge) + '"' : '') + (i >= here.length ? ' hidden' : '') + '>';
-          }).join('');
-          var plan = here.filter(function (p) { return !p.discharge; })[0] || here[0];
-          return '<tr data-room="' + esc(room) + '"><td><b>' + esc(room) + '</b></td><td><select class="n">' + opts + '</select></td>' +
-            '<td class="names">' + names + '</td><td><input type="date" class="pd" value="' + esc(plan && plan.plannedDischarge || '') + '"></td></tr>';
-        }).join('');
-    }).join('');
-    $('#opening-table').innerHTML = '<thead><tr><th>Room</th><th>Patients</th><th>Names</th><th>Planned discharge</th></tr></thead><tbody>' + rows + '</tbody>';
-    countOpening();
-  }
-  function countOpening() {
-    var patients = 0, rooms = 0;
-    $$('#opening-table tr[data-room]').forEach(function (tr) {
-      var n = +$('.n', tr).value;
-      patients += n;
-      if (n) rooms++;
-      $$('.names input', tr).forEach(function (inp) { inp.hidden = +inp.dataset.i >= n; });
-    });
-    var total = Calc.roomIndex(state.categories).total;
-    $('#opening-count').innerHTML = [['Patients in house', patients], ['Rooms occupied', rooms], ['Total rooms', total], ['Rooms available', total - rooms]]
-      .map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('');
-  }
-  $('#opening-table').addEventListener('change', function (e) { if (e.target.classList.contains('n')) countOpening(); });
-
-  $('#opening-save').addEventListener('click', function () {
-    var toSave = [], remove = [];
-    $$('#opening-table tr[data-room]').forEach(function (tr) {
-      var room = tr.dataset.room, n = +$('.n', tr).value, pd = $('.pd', tr).value;
-      var here = carriedIn(room);
-      for (var i = 0; i < Math.max(n, here.length); i++) {
-        var p = here[i];
-        if (i >= n) { if (p && !p.discharge) remove.push(p.id); continue; }
-        if (p && p.discharge) continue; // already discharged: leave as it is
-        var name = $('.names input[data-i="' + i + '"]', tr).value.trim();
-        toSave.push(Object.assign({ type: 'admission', admission: OPEN, visitDate: OPEN, source: '', extensions: [] }, p || {}, {
-          room: room, name: name, plannedDischarge: pd, share: n > 1
-        }));
-      }
-    });
-    save('savePatients', { save: toSave, remove: remove }, 'Opening balance saved. The report now starts from ' + short(OPEN) + '.');
   });
 
   /* ---------- start ---------- */
