@@ -99,7 +99,10 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'backend', 'Code-all-
 
 const post = (action, record) => ctx.doPost({ postData: { contents: JSON.stringify({ key: 'test-key', action, record }) } });
 
-ctx.setup();
+// No setup run: the first request builds the tabs.
+const first = ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+assert.ok(first.ok, first.error);
+ctx.setup(); // running setup again keeps everything
 assert.deepStrictEqual(ss.sheets.filter(s => !s.hidden).map(s => s.name), ['IP Report', 'Room Categories']);
 const rooms = ss.getSheetByName('Room Categories');
 const report = ss.getSheetByName('IP Report');

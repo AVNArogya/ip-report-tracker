@@ -502,9 +502,17 @@ function onEdit(e) {
 
 /* ---------- web app API ---------- */
 
+// The tabs are built on the first request if setup hasn't been run (or a tab was deleted).
+function ensureTabs_() {
+  var ss = SpreadsheetApp.getActive();
+  var missing = [REPORT, ROOMS, PATIENTS, BLOCKS, PLAN].some(function (n) { return !ss.getSheetByName(n); });
+  if (missing) setup();
+}
+
 function doGet(e) {
   return handle_(function () {
     checkKey_(e.parameter.key);
+    withLock_(ensureTabs_);
     var action = e.parameter.action || 'data';
     if (action === 'data') return readAll_();
     throw new Error('Unknown action: ' + action);
@@ -516,6 +524,7 @@ function doPost(e) {
     var body = JSON.parse((e.postData && e.postData.contents) || '{}');
     checkKey_(body.key);
     return withLock_(function () {
+      ensureTabs_();
       var d = readAll_();
       var saved = null;
       if (body.action === 'savePatient') saved = savePatient_(d, body.record);
