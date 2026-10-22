@@ -132,7 +132,8 @@ var Calc = (function () {
 
   // Every IP Report column, in order: { key, label, kind }.
   // kind: 'date' | 'value' (calculated here) | 'formula' (the sheet links it to Room Categories) | 'percent'.
-  // The first 32 columns are the report's own layout; the rest are totals and per-category detail.
+  // The first 33 columns are the report's own layout; the rest are totals. Per-category admitted and
+  // out of service counts are worked out by day() and shown in the Room Categories tab, not as columns here.
   function columns(cats) {
     var cols = [{ key: 'date', label: 'Date', kind: 'date' }];
     var srcLabels = ['Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)'];
@@ -171,8 +172,6 @@ var Calc = (function () {
       { key: 'totalOutOfService', label: 'Total rooms out of service', kind: 'value' },
       { key: 'totalAvailable', label: 'Total rooms available', kind: 'formula' }
     );
-    cats.forEach(function (c) { cols.push({ key: 'adm:' + c.name, label: 'Admitted: ' + c.short, kind: 'value' }); });
-    cats.forEach(function (c) { cols.push({ key: 'oos:' + c.name, label: 'Out of service: ' + c.short, kind: 'value' }); });
     return cols;
   }
 

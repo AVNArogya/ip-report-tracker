@@ -99,7 +99,7 @@
     return d;
   }
 
-  var BACKEND_VERSION = 4; // the Apps Script version this app needs
+  var BACKEND_VERSION = 5; // the Apps Script version this app needs
 
   // Rooms by category. Older sheet code sent a one-row-per-room tab as many empty categories; regroup those here.
   function categoriesFrom(cats) {

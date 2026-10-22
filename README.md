@@ -42,7 +42,7 @@ Edit a room list and everything follows: totals, the "(of N)" headings, availabl
 | Discharges confirmed | patients in house whose planned discharge is the next day |
 | Planned admissions: walk-in / virtual / corporate, clinic, other | bookings for the next day, by source |
 
-Columns after these: walk-in visits (including people not admitted), **total rooms** (formula from Room Categories), total occupied, total out of service, **total available** (formula), then **admitted by category** and **out of service by category**.
+Columns after these (AH–AL): walk-in visits (including people not admitted), **total rooms** (formula from Room Categories), total occupied, total out of service and **total available** (formula). Admitted and out of service by category, for the date in C1, are in the **Room Categories** tab.
 
 Formula columns are shaded grey and linked to Room Categories, so the total room count is fixed by that tab.
 

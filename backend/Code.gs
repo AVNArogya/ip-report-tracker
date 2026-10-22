@@ -100,6 +100,7 @@ function onEdit(e) {
   var name = e && e.range && e.range.getSheet().getName();
   if (name === ROOMS && e.range.getRow() >= ROOMS_FIRST_ROW && e.range.getColumn() <= 5) refresh_();
   else if (name === PATIENTS || name === BLOCKS || name === PLAN) refresh_();
+  else if (name === REPORT && e.range.getA1Notation() === REPORT_DATE_CELL) refresh_(); // new date for Room Categories
 }
 
 /* ---------- web app API ---------- */
@@ -233,7 +234,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 4;
+var BACKEND_VERSION = 5;
 
 function readAll_() {
   return {
@@ -303,7 +304,7 @@ function refresh_() {
   var rep = Calc.report(cats, d.patients, d.blocks, d.plan, d.today);
   var layout = writeRoomCategories_(cats);
   writeReport_(rep, cats, layout);
-  writeRoomLookups_(cats, layout, rep.columns.length);
+  writeRoomLookups_(cats, layout, rep.columns.length, d);
 }
 
 // Room Categories: A–E are typed (category, short name, block, location, room numbers); F onwards are formulas.
@@ -350,18 +351,22 @@ function writeRoomCategories_(cats) {
   return { totalRow: totalRow, inHouseRow: inHouseRow };
 }
 
-function writeRoomLookups_(cats, layout, width) {
+// Occupied comes from the report by formula. Out of service and admitted are worked out here for the date
+// shown (IP Report C1, blank = today) and rewritten whenever C1 or the data changes.
+function writeRoomLookups_(cats, layout, width, d) {
   if (!cats.length) return;
   var sh = sheet_(ROOMS);
+  var shown = isoOf_(sheet_(REPORT).getRange(REPORT_DATE_CELL).getValue()) || d.today;
+  var v = Calc.day(shown, cats, d.patients, d.blocks, d.plan);
   var rows = [];
   for (var i = 0; i < cats.length; i++) {
     var r = ROOMS_FIRST_ROW + i;
     rows.push([lookup_('"occ:"&$A' + r, width, "'" + REPORT + "'!", "'" + REPORT + "'!" + REPORT_SHOW_CELL),
-      lookup_('"oos:"&$A' + r, width, "'" + REPORT + "'!", "'" + REPORT + "'!" + REPORT_SHOW_CELL),
+      v['oos:' + cats[i].name],
       '=F' + r + '-G' + r + '-H' + r,
-      lookup_('"adm:"&$A' + r, width, "'" + REPORT + "'!", "'" + REPORT + "'!" + REPORT_SHOW_CELL)]);
+      v['adm:' + cats[i].name]]);
   }
-  sh.getRange(ROOMS_FIRST_ROW, 7, rows.length, 4).setFormulas(rows);
+  sh.getRange(ROOMS_FIRST_ROW, 7, rows.length, 4).setValues(rows);
 }
 
 // Formula: the value in the report's column with key `keyExpr` on the shown date (0 if none).
@@ -376,11 +381,13 @@ function writeReport_(rep, cats, layout) {
   var sh = sheet_(REPORT);
   var cols = rep.columns, width = cols.length;
   if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
+  // Columns left over from an older, wider layout are removed.
+  if (sh.getMaxColumns() > width) sh.deleteColumns(width + 1, sh.getMaxColumns() - width);
   var at = {};
   cols.forEach(function (c, i) { at[c.key] = colLetter_(i + 1); });
   var roomsRef = "'" + ROOMS + "'!";
   var totalRef = roomsRef + '$F$' + layout.totalRow, inHouseRef = roomsRef + '$F$' + layout.inHouseRow;
-  var oosInHouse = cats.filter(Calc.isInHouse).map(function (c) { return at['oos:' + c.name]; });
+  var oosInHouse = Calc.blocksOf(cats).map(function (b) { return at['oosBlock:' + b]; }); // in-house rooms out of service, by block
 
   // Title and the date picker.
   sh.getRange('A1').setValue(REPORT).setFontSize(14).setFontWeight('bold');

@@ -26,6 +26,10 @@ class Sheet {
   getMaxRows() { return this.maxRows; }
   getMaxColumns() { return this.maxCols; }
   insertColumnsAfter(after, n) { this.maxCols += n; }
+  deleteColumns(from, n) {
+    Object.keys(this.cells).forEach(k => { if (+k.split(',')[1] >= from) delete this.cells[k]; });
+    this.maxCols -= n;
+  }
   insertRowsAfter(after, n) { this.maxRows += n; }
   getRange(a, b, c, d) {
     if (typeof a === 'string') {
@@ -54,6 +58,8 @@ class Range {
   getValues() { return this.grid((r, c) => this.sh.get(r, c)); }
   getDisplayValues() { return this.grid((r, c) => String(this.sh.get(r, c))); }
   getDisplayValue() { return String(this.sh.get(this.r, this.c)); }
+  getValue() { return this.sh.get(this.r, this.c); }
+  getA1Notation() { return 'C1'; }
   setValues(v) {
     assert.strictEqual(v.length, this.nr, 'setValues rows on ' + this.sh.name);
     v.forEach((row, i) => { assert.strictEqual(row.length, this.nc, 'setValues columns on ' + this.sh.name); row.forEach((x, j) => this.sh.set(this.r + i, this.c + j, x)); });
@@ -137,8 +143,15 @@ assert.strictEqual(report.getLastRow(), 29);
 assert.strictEqual(report.get(6, keys['occ:Economy']), 'Economy (of 12)');
 assert.strictEqual(val('2026-10-20', 'admitted'), 1);
 assert.strictEqual(val('2026-10-20', 'src:Walk-in (PCE)'), 1);
-assert.strictEqual(val('2026-10-20', 'adm:Economy'), 1);
-assert.strictEqual(val('2026-10-21', 'adm:Classic villa'), 1);
+// Columns stop at AL (Total rooms available); per-category admitted / out of service are in Room Categories.
+assert.strictEqual(report.getLastColumn(), 38);
+assert.strictEqual(report.get(6, 38), 'Total rooms available');
+assert.strictEqual(keys['adm:Economy'], undefined);
+report.set(1, 3, '2026-10-21'); // pick 21 Oct in C1
+ctx.onEdit({ range: { getSheet: () => report, getA1Notation: () => 'C1', getRow: () => 1, getColumn: () => 3 } });
+assert.strictEqual(rooms.get(4 + 4, 10), 1, 'Classic villa admitted on 21 Oct');
+assert.strictEqual(rooms.get(4, 10), 0);
+report.set(1, 3, '');
 assert.strictEqual(val('2026-10-21', 'occ:Economy'), 1);
 assert.strictEqual(val('2026-10-21', 'walkInVisits'), 1);
 assert.strictEqual(val('2026-10-21', 'totalOccupied'), 49); // 47 from 30 Sep + 2
