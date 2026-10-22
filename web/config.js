@@ -1,6 +1,6 @@
 // Fill these in after deploying the Apps Script backend as a web app (see SETUP.md).
 // Leave API_URL empty to run in practice mode: entries are kept only in this browser.
 window.APP_CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbztBJte9XAl27bSsosuOoC0gL44-w1dHTWG7D5F-EmVqu1cxFuqx6TrKgwEU1_Tv7WjHA/exec',   // e.g. 'https://script.google.com/macros/s/AKfy.../exec'
+  API_URL: 'https://script.google.com/macros/s/AKfycbzxPQU7U044EV74P_iLFFIgrzZ-89UO_J-n0SzmhD9yI4hT6hUYWjDax47XQbbfQE0gVw/exec',   // e.g. 'https://script.google.com/macros/s/AKfy.../exec'
   APP_KEY: 'avn-ip-2026-k7q9'    // same value as the APP_KEY script property
 };
