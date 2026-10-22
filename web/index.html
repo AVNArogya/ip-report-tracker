@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IP Report</title>
+  <meta name="theme-color" content="#1f4e79">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>IP Report</h1>
+    <span id="mode" class="mode"></span>
+    <nav id="tabs">
+      <button data-tab="entry" class="active">New entry</button>
+      <button data-tab="patients">Patients</button>
+      <button data-tab="rooms">Rooms</button>
+      <button data-tab="report">Report</button>
+    </nav>
+  </header>
+  <div id="status" class="status" hidden></div>
+
+  <main>
+    <!-- New entry / edit -->
+    <section id="tab-entry" class="tab">
+      <form id="entry" class="card" autocomplete="off">
+        <h2 id="entry-title">New entry</h2>
+        <input type="hidden" name="id">
+        <fieldset class="types">
+          <label><input type="radio" name="type" value="admission" checked> Admission</label>
+          <label><input type="radio" name="type" value="visit"> Walk-in visit (not admitted)</label>
+          <label><input type="radio" name="type" value="booking"> Booking (planned admission)</label>
+        </fieldset>
+        <div class="grid">
+          <label>Patient name <input name="name" required></label>
+          <label>Phone <input name="phone" inputmode="tel"></label>
+          <label>Source <select name="source" required></select></label>
+          <label data-for="visit booking">Visit / booking date <input type="date" name="visitDate"></label>
+          <label data-for="booking admission">Planned admission <input type="date" name="plannedAdmission"></label>
+          <label data-for="admission">Admission date <input type="date" name="admission"></label>
+          <label data-for="admission">Room <select name="room"></select></label>
+          <label data-for="booking admission">Planned discharge <input type="date" name="plannedDischarge"></label>
+          <label data-for="admission" class="edit-only">Discharge date <input type="date" name="discharge"></label>
+          <label data-for="admission" class="edit-only">Stay extended on <input name="extensions" placeholder="yyyy-mm-dd, yyyy-mm-dd"></label>
+        </div>
+        <label data-for="admission" class="check"><input type="checkbox" name="share"> Sharing a room (a second patient in an occupied room)</label>
+        <label>Notes <textarea name="notes" rows="2"></textarea></label>
+        <div class="actions">
+          <button type="submit" class="primary">Save</button>
+          <button type="button" id="entry-cancel" hidden>Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Patients -->
+    <section id="tab-patients" class="tab" hidden>
+      <div class="toolbar">
+        <div class="chips" id="patient-filter">
+          <button data-f="inhouse" class="active">In house</button>
+          <button data-f="booking">Bookings</button>
+          <button data-f="visit">Walk-in visits</button>
+          <button data-f="discharged">Discharged</button>
+          <button data-f="all">All</button>
+        </div>
+        <input id="patient-search" type="search" placeholder="Search name, phone or room">
+      </div>
+      <div class="table-wrap"><table id="patient-table" class="list"></table></div>
+    </section>
+
+    <!-- Rooms -->
+    <section id="tab-rooms" class="tab" hidden>
+      <div class="toolbar">
+        <label>Date <input type="date" id="rooms-date"></label>
+        <span class="legend"><i class="available"></i>Available <i class="admitted"></i>Admitted today <i class="occupied"></i>Occupied
+          <i class="discharged"></i>Discharged today <i class="out"></i>Out of service</span>
+      </div>
+      <div id="board"></div>
+      <h3>Rooms out of service</h3>
+      <div class="table-wrap"><table id="block-table" class="list"></table></div>
+    </section>
+
+    <!-- Report -->
+    <section id="tab-report" class="tab" hidden>
+      <div class="toolbar">
+        <label>Date <input type="date" id="report-date"></label>
+        <label>KR plan (patients in house) <input type="number" step="0.01" id="plan-value" class="short"></label>
+        <button id="plan-save">Save plan</button>
+        <button id="csv">Download CSV (month)</button>
+      </div>
+      <div id="summary" class="cards"></div>
+      <div class="table-wrap"><table id="cat-table" class="list"></table></div>
+      <h3 id="month-title"></h3>
+      <div class="table-wrap"><table id="month-table" class="report"></table></div>
+    </section>
+  </main>
+
+  <dialog id="dlg">
+    <form method="dialog" id="dlg-form">
+      <h3 id="dlg-title"></h3>
+      <div id="dlg-body"></div>
+      <div class="actions">
+        <button value="ok" class="primary" id="dlg-ok">OK</button>
+        <button value="cancel" formnovalidate>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="config.js"></script>
+  <script src="calc.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
