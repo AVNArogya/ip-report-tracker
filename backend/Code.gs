@@ -319,6 +319,8 @@ function writeRoomCategories_(cats) {
   var n = cats.length, first = ROOMS_FIRST_ROW, last = first + n - 1;
   var totalRow = last + 1, inHouseRow = last + 2;
   // Clear anything left below the categories (old total rows), then write the two total rows.
+  // One row per category (a tab typed as one row per room is tidied into this), then clear what's below.
+  if (n) sh.getRange(first, 1, n, 5).setValues(Calc.categoryRows(cats));
   var clearFrom = totalRow;
   if (sh.getMaxRows() >= clearFrom) sh.getRange(clearFrom, 1, sh.getMaxRows() - clearFrom + 1, head.length).clear();
   if (n) {

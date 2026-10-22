@@ -176,3 +176,12 @@ test('fixed 30 Sep position: 49 patients in 47 rooms, entries from 1 Oct', () =>
   assert.strictEqual(c.patient.roomFreed, 'Yes');
   assert.match(Calc.checkPatient({ type: 'carried', discharge: '2026-09-30' }, [], cats, []).errors.join(' '), /after/);
 });
+
+test('Room Categories typed as one row per room', () => {
+  const rows = [['Category', 'Room', '', '', '']];
+  Calc.DEFAULT_CATEGORIES.forEach(d => Calc.splitRooms(d[4]).forEach(r => rows.push([d[0], r, '', '', ''])));
+  const parsed = Calc.parseCategories(rows);
+  assert.deepStrictEqual(parsed, cats);
+  assert.strictEqual(Calc.roomIndex(parsed).total, 64);
+  assert.deepStrictEqual(Calc.categoryRows(parsed), Calc.DEFAULT_CATEGORIES);
+});

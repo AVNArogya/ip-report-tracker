@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const Calc = require('../web/calc.js');
 const assert = require('assert');
 
 require('../build.js');
@@ -172,6 +173,19 @@ assert.strictEqual(val('2026-10-05', 'totalOccupied'), 46);
 assert.strictEqual(val('2026-10-21', 'inHousePatients'), 49); // 48 + Asha
 const early = post('savePatient', { type: 'admission', name: 'Early', source: 'Corporate', admission: '2026-09-28', room: '103' });
 assert.ok(!early.ok && /starting figures/.test(early.error), 'admissions before 1 Oct are refused');
+
+// Room Categories pasted as one row per room (Category | Room): read, and tidied to one row per category.
+rooms.cells = {};
+let r = 4;
+Calc.DEFAULT_CATEGORIES.forEach(d => Calc.splitRooms(d[4]).forEach(room => { rooms.set(r, 1, d[0]); rooms.set(r, 2, room); r++; }));
+const loaded = ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+assert.strictEqual(loaded.data.categories.length, 9);
+assert.strictEqual(loaded.data.categories[0].rooms.length, 12);
+assert.ok(post('savePlan', { date: '2026-10-22', plan: 61 }).ok);
+assert.strictEqual(rooms.get(4, 5), 'J 1, J 2, J 3, J 4, J 5, J 6, J 7, J 8, J 9, J 10, J 11, J 12');
+assert.strictEqual(rooms.get(12, 1), 'Hotel rooms');
+assert.strictEqual(rooms.get(13, 1), 'Total');
+assert.strictEqual(rooms.get(20, 1), '', 'old per-room rows cleared');
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

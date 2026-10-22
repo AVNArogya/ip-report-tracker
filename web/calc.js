@@ -72,21 +72,41 @@ var Calc = (function () {
 
   /* ---------- rooms ---------- */
 
-  // Rows of the Room Categories tab ([category, short, block, location, rooms text]) → categories.
+  // Rows of the Room Categories tab → categories. Two layouts are read:
+  //   one row per category: [category, short name, block, location, 'room, room, ...'];
+  //   one row per room:     [category, room]  (column E empty on every row).
+  // Rows with the same category name are merged.
   function parseCategories(rows) {
-    var cats = [];
-    (rows || []).forEach(function (r) {
+    rows = (rows || []).filter(function (r) {
       var name = roomName(r[0]);
-      if (!name || /^total/i.test(name) || /^in-house total/i.test(name)) return;
-      cats.push({
-        name: name,
-        short: roomName(r[1]) || name,
-        block: roomName(r[2]),
-        location: roomName(r[3]) || 'In-house',
-        rooms: splitRooms(r[4])
-      });
+      return name && !/^(in-house )?total/i.test(name) && !/^category$/i.test(name);
+    });
+    var perRoom = rows.length > 0 && rows.every(function (r) { return !roomName(r[4]) && roomName(r[1]); });
+    var defaults = {};
+    DEFAULT_CATEGORIES.forEach(function (d) { defaults[d[0].toLowerCase()] = d; });
+    var cats = [], byName = {};
+    rows.forEach(function (r) {
+      var name = roomName(r[0]);
+      var cat = byName[name.toLowerCase()];
+      if (!cat) {
+        var d = defaults[name.toLowerCase()];
+        cat = {
+          name: name,
+          short: (!perRoom && roomName(r[1])) || (d ? d[1] : name),
+          block: (!perRoom && roomName(r[2])) || (d ? d[2] : ''),
+          location: (!perRoom && roomName(r[3])) || (d ? d[3] : /apartment/i.test(name) ? 'Apartment' : /hotel/i.test(name) ? 'Hotel' : 'In-house'),
+          rooms: []
+        };
+        byName[name.toLowerCase()] = cat;
+        cats.push(cat);
+      }
+      cat.rooms = cat.rooms.concat(perRoom ? [roomName(r[1])] : splitRooms(r[4]));
     });
     return cats;
+  }
+  // Categories → the tab's standard rows (one per category).
+  function categoryRows(cats) {
+    return cats.map(function (c) { return [c.name, c.short, c.block, c.location, c.rooms.join(', ')]; });
   }
   function defaultCategories() { return parseCategories(DEFAULT_CATEGORIES); }
 
@@ -385,7 +405,7 @@ var Calc = (function () {
   return {
     SOURCES: SOURCES, TYPES: TYPES, DEFAULT_CATEGORIES: DEFAULT_CATEGORIES, OPENING: OPENING, OPENING_DATE: OPENING_DATE, isCarried: isCarried,
     addDays: addDays, datesBetween: datesBetween, toIso: toIso, splitRooms: splitRooms, isInHouse: isInHouse,
-    parseCategories: parseCategories, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
+    parseCategories: parseCategories, categoryRows: categoryRows, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
     columns: columns, day: day, report: report, reportRange: reportRange, roomBoard: roomBoard,
     inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBlock: checkBlock
   };
