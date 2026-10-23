@@ -19,10 +19,20 @@ var Calc = (function () {
   var SOURCES = ['Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)'];
   var WALK_IN = SOURCES[0];
 
-  // Position at the end of 30 Sep, fixed: 49 patients in 47 of the 64 rooms (taken as in-house rooms).
-  // The report starts with this row; from 1 Oct, entries add admissions and take away discharges.
-  // A patient who was already in on 30 Sep is discharged with a 'carried' entry (no admission).
-  var OPENING = { date: '2026-09-30', patients: 49, rooms: 47 };
+  // Position at the end of 30 Sep, fixed (brought forward from the old Daily IP Report, row "30 Sep"):
+  // rooms occupied in each category, and 49 patients in those 47 rooms (2 rooms had 2 patients).
+  // The report starts with this row; from 1 Oct each category carries forward: rooms admitted into are
+  // added, rooms vacated are taken away. A patient who was already in on 30 Sep is discharged with a
+  // 'carried' entry (no admission); with "room vacated" it frees a room in that room's category.
+  var OPENING = {
+    date: '2026-09-30',
+    patients: 49,
+    byCategory: {
+      'Economy': 10, 'Executive (J block)': 6, 'Executive (S block)': 21, 'Deluxe': 1, 'Classic villa': 4,
+      'Deluxe villa': 2, 'Royal villa': 1, 'Apartment rooms': 2, 'Hotel rooms': 0
+    }
+  };
+  OPENING.rooms = Object.keys(OPENING.byCategory).reduce(function (a, k) { return a + OPENING.byCategory[k]; }, 0); // 47
   var OPENING_DATE = OPENING.date;
   var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission', carried: 'Discharge (admitted before 1 Oct)' };
   function isCarried(p) { return p.type === 'carried' && !!p.discharge; }
@@ -197,7 +207,7 @@ var Calc = (function () {
 
     var inRoom = {}; // room → patients in house tonight
     var counted = d > OPENING_DATE; // the 30 Sep row shows the fixed position, not the day's movements
-    var carriedOut = 0, carriedFreed = 0, carriedFreedInHouse = 0;
+    var carriedOut = 0, freedByCat = {}, freedNoCat = 0;
     patients.forEach(function (p) {
       var cat = idx.byRoom[p.room];
       if (isCarried(p)) {
@@ -205,8 +215,8 @@ var Calc = (function () {
         if (p.discharge <= d) {
           carriedOut++;
           if (yes(p.roomFreed)) {
-            carriedFreed++;
-            if (!cat || isInHouse(cat)) carriedFreedInHouse++;
+            if (cat) freedByCat[cat.name] = (freedByCat[cat.name] || 0) + 1;
+            else freedNoCat++;
           }
         }
         return;
@@ -237,11 +247,9 @@ var Calc = (function () {
     });
 
     var occInHouse = 0, occAll = 0;
-    v.sharing = 0;
     Object.keys(inRoom).forEach(function (room) {
       var cat = idx.byRoom[room];
       occAll++;
-      if (inRoom[room].length > 1) v.sharing += inRoom[room].length;
       if (!cat) return;
       v['occ:' + cat.name]++;
       if (isInHouse(cat)) occInHouse++;
@@ -261,11 +269,18 @@ var Calc = (function () {
       }
     });
 
-    // Add the patients and rooms carried forward from 30 Sep who have not been discharged yet.
-    // Their rooms aren't known room by room, so they count in the totals, not in the category columns.
+    // Carry forward the 30 Sep rooms in each category, less those vacated since by patients from before 1 Oct.
+    cats.forEach(function (c) {
+      var n = Math.max(0, (OPENING.byCategory[c.name] || 0) - (freedByCat[c.name] || 0));
+      v['occ:' + c.name] += n;
+      occAll += n;
+      if (isInHouse(c)) occInHouse += n;
+    });
+    occAll -= freedNoCat;      // older entries with no room given: taken off the in-house totals
+    occInHouse -= freedNoCat;
     v.inHousePatients += OPENING.patients - carriedOut;
-    occInHouse += OPENING.rooms - carriedFreedInHouse;
-    occAll += OPENING.rooms - carriedFreed;
+    // As in the old report, patients in house = rooms occupied + patients sharing a room.
+    v.sharing = Math.max(0, v.inHousePatients - occAll);
 
     v.inHouseOccupied = occInHouse;
     v.inHouseAvailable = idx.inHouse - occInHouse - oosInHouse;
@@ -357,6 +372,7 @@ var Calc = (function () {
       if (!p.discharge) errors.push('Enter the discharge date.');
       else if (p.discharge <= OPENING_DATE) errors.push('The discharge date must be after ' + OPENING_DATE + '; earlier discharges are already in the 30 Sep figures.');
       if (p.room && !idx.byRoom[p.room]) errors.push('Room ' + p.room + ' is not in the Room Categories tab.');
+      else if (!p.room && p.roomFreed === 'Yes') errors.push('Choose the room that is now empty, so its category goes down by 1.');
       p.admission = null; p.plannedAdmission = null; p.plannedDischarge = null; p.visitDate = null; p.extensions = [];
       delete p.share;
       return { patient: p, errors: errors };

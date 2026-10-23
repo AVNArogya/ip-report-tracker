@@ -47,11 +47,11 @@ Columns after these (AH–AL): walk-in visits (including people not admitted), *
 Formula columns are shaded grey and linked to Room Categories, so the total room count is fixed by that tab.
 
 ## Starting position on 30 Sep (fixed)
-Up to 30 Sep 2026 the figures are fixed: **49 patients in house, 47 of the 64 rooms occupied, 17 available**. Nothing needs entering for this; the 30 Sep row shows it, and entries start on 1 Oct.
+Up to 30 Sep 2026 the figures are fixed, brought forward from the 30 Sep row of the old Daily IP Report: **49 patients in house in 47 of the 64 rooms** (Economy 10, Executive JF 6, Executive S 21, Deluxe 1, Classic villa 4, Deluxe villa 2, Royal villa 1, Apartment 2, Hotel 0; 2 patients sharing). Nothing needs entering for this; the 30 Sep row shows it.
 
 - **From 1 Oct**, every admission entered adds to those figures and every discharge takes away from them.
-- When one of the 49 patients from before 1 Oct leaves, enter **New entry → Discharge (admitted before 1 Oct)** with the discharge date. Patients in house go down by 1. Tick *the room is now empty* to also take 1 off the occupied rooms; leave it unticked if the patient was sharing and the room is still occupied. The room and name are optional.
-- The 47 rooms aren't known room by room, so they count in the totals (patients in house, in-house rooms occupied and available, total occupied and available) but not in the per-category columns, which count patients admitted from 1 Oct.
+- When one of the 49 patients from before 1 Oct leaves, enter **New entry → Discharge (admitted before 1 Oct)** with the discharge date. Patients in house go down by 1. Tick *the room is now empty* to also take 1 off the occupied rooms; leave it unticked if the patient was sharing and the room is still occupied. Choose the room so its category goes down by 1; the name is optional.
+- **Room counts are cumulative by category:** each day starts from the day before (from 30 Sep), adds the rooms admitted into and takes away the rooms vacated. Admitted: total and the source columns stay daily.
 - Admissions dated before 1 Oct are refused, because they are already in the 49.
 - The figures are `OPENING` in `web/calc.js`.
 

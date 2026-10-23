@@ -99,7 +99,7 @@
     return d;
   }
 
-  var BACKEND_VERSION = 5; // the Apps Script version this app needs
+  var BACKEND_VERSION = 6; // the Apps Script version this app needs
 
   // Rooms by category. Older sheet code sent a one-row-per-room tab as many empty categories; regroup those here.
   function categoriesFrom(cats) {
@@ -164,9 +164,11 @@
     var current = form.room.value;
     var board = Calc.roomBoard(date, state.categories, state.patients.filter(function (p) { return !editing || p.id !== editing.id; }), state.blocks);
     form.room.innerHTML = '<option value="">Choose a room</option>';
+    // Free rooms per category as the report counts them (includes the rooms carried forward from 30 Sep).
+    var counts = Calc.day(date, state.categories, state.patients, state.blocks, state.plan);
     state.categories.forEach(function (c) {
       var g = document.createElement('optgroup');
-      var free = board.filter(function (r) { return r.category === c.name && (r.status === 'available' || r.status === 'discharged'); }).length;
+      var free = Math.max(0, c.rooms.length - counts['occ:' + c.name] - counts['oos:' + c.name]);
       g.label = c.name + ' (' + free + ' of ' + c.rooms.length + ' free)';
       board.filter(function (r) { return r.category === c.name; }).forEach(function (r) {
         var note = r.status === 'out' ? ' (out of service)' : r.patients.length ? ' (occupied: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' : '';

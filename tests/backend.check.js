@@ -152,11 +152,11 @@ ctx.onEdit({ range: { getSheet: () => report, getA1Notation: () => 'C1', getRow:
 assert.strictEqual(rooms.get(4 + 4, 10), 1, 'Classic villa admitted on 21 Oct');
 assert.strictEqual(rooms.get(4, 10), 0);
 report.set(1, 3, '');
-assert.strictEqual(val('2026-10-21', 'occ:Economy'), 1);
+assert.strictEqual(val('2026-10-21', 'occ:Economy'), 11); // 10 from 30 Sep + Asha
 assert.strictEqual(val('2026-10-21', 'walkInVisits'), 1);
 assert.strictEqual(val('2026-10-21', 'totalOccupied'), 49); // 47 from 30 Sep + 2
 assert.strictEqual(val('2026-10-22', 'discharged'), 1);
-assert.strictEqual(val('2026-10-22', 'occ:Economy'), 0);
+assert.strictEqual(val('2026-10-22', 'occ:Economy'), 10);
 assert.strictEqual(val('2026-10-22', 'totalOccupied'), 48);
 assert.strictEqual(val('2026-10-20', 'plan'), 57.77);
 assert.match(String(val('2026-10-22', 'totalAvailable')), /^=/);

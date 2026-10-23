@@ -46,8 +46,8 @@
           <label data-for="admission carried" class="edit-only">Discharge date <input type="date" name="discharge"></label>
           <label data-for="admission" class="edit-only">Stay extended on <input name="extensions" placeholder="yyyy-mm-dd, yyyy-mm-dd"></label>
         </div>
-        <p data-for="carried" class="hint">For a patient who was already in on 30 Sep (one of the 49). Takes 1 off patients in house from the discharge date; the room is optional.</p>
-        <label data-for="carried" class="check"><input type="checkbox" name="roomFreed" checked> The room is now empty (takes 1 off the 47 occupied rooms)</label>
+        <p data-for="carried" class="hint">For a patient who was already in on 30 Sep (one of the 49). Takes 1 off patients in house from the discharge date.</p>
+        <label data-for="carried" class="check"><input type="checkbox" name="roomFreed" checked> The room is now empty: choose the room above, and its category goes down by 1 (untick if the patient was sharing and the room is still occupied)</label>
         <label data-for="admission" class="check"><input type="checkbox" name="share"> Sharing a room (a second patient in an occupied room)</label>
         <label>Notes <textarea name="notes" rows="2"></textarea></label>
         <div class="actions">

@@ -45,24 +45,24 @@ test('admission, occupancy and discharge by date', () => {
   assert.strictEqual(d10['src:' + VIRTUAL], 1);
   assert.strictEqual(d10['adm:Economy'], 1);
   assert.strictEqual(d10['adm:Executive (S block)'], 1);
-  assert.strictEqual(d10['occ:Economy'], 1);
-  // Every total includes the 49 patients in 47 rooms from 30 Sep.
-  assert.strictEqual(d10.inHouseOccupied, 49);
-  assert.strictEqual(d10.inHouseAvailable, 7);
+  assert.strictEqual(d10['occ:Economy'], 11); // 10 from 30 Sep + 1
+  // Every total includes the 49 patients in 47 rooms from 30 Sep (45 in-house, 2 apartment).
+  assert.strictEqual(d10.inHouseOccupied, 47);
+  assert.strictEqual(d10.inHouseAvailable, 9);
   assert.strictEqual(d10.totalOccupied, 49);
   assert.strictEqual(d10.totalAvailable, 15);
 
   const d11 = Calc.day('2026-10-11', cats, patients, [], {});
   assert.strictEqual(d11.admitted, 1);
-  assert.strictEqual(d11['occ:Apartment rooms'], 1);
-  assert.strictEqual(d11.inHouseOccupied, 49);
+  assert.strictEqual(d11['occ:Apartment rooms'], 3);
+  assert.strictEqual(d11.inHouseOccupied, 47);
   assert.strictEqual(d11.totalOccupied, 50);
   assert.strictEqual(d11.dischargesConfirmed, 0);
 
   // Discharged on the 12th, the day before the planned 13th: counted on the 12th only.
   const d12 = Calc.day('2026-10-12', cats, patients, [], {});
   assert.strictEqual(d12.discharged, 1);
-  assert.strictEqual(d12['occ:Economy'], 0);
+  assert.strictEqual(d12['occ:Economy'], 10);
   assert.strictEqual(d12.inHousePatients, 51);
   assert.strictEqual(d12.totalAvailable, 15);
   assert.strictEqual(Calc.day('2026-10-13', cats, patients, [], {}).discharged, 0);
@@ -86,8 +86,8 @@ test('sharing, extensions, planned discharges and bookings', () => {
     admit('6', 'J 3', '2026-10-03', { plannedAdmission: '2026-10-06' })
   ];
   const v = Calc.day('2026-10-03', cats, patients, [], { '2026-10-03': 55.5 });
-  assert.strictEqual(v.sharing, 2);
-  assert.strictEqual(v['occ:Classic villa'], 1);
+  assert.strictEqual(v.sharing, 3); // 2 from 30 Sep + the second patient in 501
+  assert.strictEqual(v['occ:Classic villa'], 5);
   assert.strictEqual(v.inHousePatients, 52);
   assert.strictEqual(v.totalOccupied, 49);
   assert.strictEqual(v.extended, 1);
@@ -109,7 +109,7 @@ test('out of service rooms by block', () => {
   assert.strictEqual(v['oosBlock:J'], 1);
   assert.strictEqual(v['oosBlock:SW'], 1);
   assert.strictEqual(v['oos:Hotel rooms'], 1);
-  assert.strictEqual(v.inHouseAvailable, 7);
+  assert.strictEqual(v.inHouseAvailable, 9);
   assert.strictEqual(v.totalOutOfService, 3);
   assert.strictEqual(v.totalAvailable, 14);
   assert.strictEqual(Calc.day('2026-10-03', cats, [], blocks, {})['oosBlock:J'], 0);
@@ -171,11 +171,14 @@ test('fixed 30 Sep position: 49 patients in 47 rooms, entries from 1 Oct', () =>
   assert.strictEqual(oct2.discharged, 2);
   assert.strictEqual(oct2.inHousePatients, 48);
   assert.strictEqual(oct2.totalOccupied, 47);
-  assert.strictEqual(oct2.inHouseOccupied, 46);
+  assert.strictEqual(oct2.inHouseOccupied, 44);
+  assert.strictEqual(oct2['occ:Economy'], 9); // J 5 vacated
+  assert.strictEqual(oct2.sharing, 1);
   assert.strictEqual(oct2.totalAvailable, 17);
 
   assert.match(Calc.checkPatient({ name: 'X', source: WALK, type: 'admission', admission: '2026-09-29', room: 'J 1' }, [], cats, []).errors.join(' '), /starting figures/);
-  const c = Calc.checkPatient({ type: 'carried', discharge: '2026-10-05', roomFreed: true }, [], cats, []);
+  assert.match(Calc.checkPatient({ type: 'carried', discharge: '2026-10-05', roomFreed: true }, [], cats, []).errors.join(' '), /Choose the room/);
+  const c = Calc.checkPatient({ type: 'carried', discharge: '2026-10-05', room: '102', roomFreed: true }, [], cats, []);
   assert.deepStrictEqual(c.errors, []);
   assert.strictEqual(c.patient.roomFreed, 'Yes');
   assert.match(Calc.checkPatient({ type: 'carried', discharge: '2026-09-30' }, [], cats, []).errors.join(' '), /after/);
@@ -188,4 +191,22 @@ test('Room Categories typed as one row per room', () => {
   assert.deepStrictEqual(parsed, cats);
   assert.strictEqual(Calc.roomIndex(parsed).total, 64);
   assert.deepStrictEqual(Calc.categoryRows(parsed), Calc.DEFAULT_CATEGORIES);
+});
+
+test('30 Sep starting figures match the old Daily IP Report', () => {
+  const v = Calc.day('2026-09-30', cats, [], [], {});
+  assert.deepStrictEqual(cats.map(c => v['occ:' + c.name]), [10, 6, 21, 1, 4, 2, 1, 2, 0]);
+  assert.strictEqual(v.inHouseOccupied, 45);
+  assert.strictEqual(v.totalOccupied, 47);
+  assert.strictEqual(v.sharing, 2);
+  assert.strictEqual(v.inHousePatients, 49);
+  // 1 Oct: two admissions into Economy and one into Executive S are added to 30 Sep.
+  const p = [admit('a', 'J 1', '2026-10-01'), admit('b', 'J 2', '2026-10-01'), admit('c', '101', '2026-10-01')];
+  const o1 = Calc.day('2026-10-01', cats, p, [], {});
+  assert.strictEqual(o1['occ:Economy'], 12);
+  assert.strictEqual(o1['occ:Executive (S block)'], 22);
+  assert.strictEqual(o1.inHousePatients, 52);
+  assert.strictEqual(o1['adm:Economy'], 2);
+  // ...and they are still counted on 2 Oct (cumulative), with nothing new entered.
+  assert.strictEqual(Calc.day('2026-10-02', cats, p, [], {})['occ:Economy'], 12);
 });
