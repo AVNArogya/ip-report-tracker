@@ -670,7 +670,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 6;
+var BACKEND_VERSION = 7;
 
 function readAll_() {
   return {
