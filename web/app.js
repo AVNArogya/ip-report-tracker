@@ -127,7 +127,15 @@
       apply(data);
       status(okMsg || 'Saved.', 'ok');
       return data;
-    }).catch(function (e) { status(e.message, 'error'); throw e; });
+    }).catch(function (e) {
+      var msg = e.message;
+      // Sheet code from before 3+ patients could share a room.
+      if (/already has two patients/.test(msg)) {
+        msg += ' To allow 3 or more patients in a room, the Google Sheet needs the latest Apps Script code: paste backend/Code-all-in-one.gs from GitHub, Save, then Deploy → Manage deployments → Edit → New version.';
+      }
+      status(msg, 'error');
+      throw e;
+    });
   }
 
   /* ---------- tabs ---------- */
@@ -138,7 +146,7 @@
   }
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
 
-  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); }
+  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderDatewise(); }
 
   /* ---------- entry form ---------- */
 
@@ -152,11 +160,44 @@
       var show = el.dataset.for.split(' ').indexOf(t) >= 0 && (!el.classList.contains('edit-only') || editing || t === 'carried');
       el.hidden = !show;
     });
+    $$('.edit-hide', form).forEach(function (el) { el.hidden = !!editing; });
     if (t === 'carried' && !form.discharge.value) form.discharge.value = state.today;
     renderRoomOptions();
   }
   $$('input[name=type]', form).forEach(function (r) { r.addEventListener('change', syncFields); });
   form.admission.addEventListener('change', renderRoomOptions);
+  form.room.addEventListener('change', showOccupants);
+
+  // Who is already in the chosen room on the admission date. An occupied room means this patient shares it.
+  function occupantsOf(room, date) {
+    return state.patients.filter(function (p) {
+      return p.room === room && (!editing || p.id !== editing.id) && Calc.inHouseOn(p, date);
+    });
+  }
+  function showOccupants() {
+    var el = $('#room-occupants');
+    var here = typeNow() === 'admission' && form.room.value ? occupantsOf(form.room.value, form.admission.value || state.today) : [];
+    el.hidden = !here.length;
+    if (!here.length) return;
+    var adding = 1 + $$('#sharers input').length;
+    el.textContent = 'Room ' + form.room.value + ' already has ' + here.length + (here.length === 1 ? ' patient' : ' patients') + ': ' +
+      here.map(function (p) { return p.name; }).join(', ') + '. Saving makes ' + (here.length + adding) + ' patients sharing this room.';
+    form.share.checked = true;
+  }
+
+  // Extra patients admitted into the same room at the same time (new entries only).
+  function addSharerRow(name) {
+    var row = document.createElement('div');
+    row.className = 'sharer';
+    row.innerHTML = '<input placeholder="Name of patient sharing this room"><button type="button" class="danger" title="Remove">Remove</button>';
+    $('input', row).value = name || '';
+    $('button', row).addEventListener('click', function () { row.remove(); showOccupants(); });
+    $('#sharers').appendChild(row);
+    form.share.checked = true;
+    showOccupants();
+    $('input', row).focus();
+  }
+  $('#add-sharer').addEventListener('click', function () { addSharerRow(''); });
 
   // Rooms grouped by category, with what each one is doing on the admission date.
   function renderRoomOptions() {
@@ -173,17 +214,19 @@
       board.filter(function (r) { return r.category === c.name; }).forEach(function (r) {
         var note = r.status === 'out' ? ' (out of service)' : r.patients.length ? ' (occupied: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' : '';
         var o = new Option(r.room + note, r.room);
-        o.disabled = r.status === 'out' || r.patients.length >= 2;
+        o.disabled = r.status === 'out';
         g.appendChild(o);
       });
       form.room.appendChild(g);
     });
     form.room.value = current;
+    showOccupants();
   }
 
   function resetForm(p) {
     editing = p || null;
     form.reset();
+    $('#sharers').innerHTML = '';
     $('#entry-title').textContent = p ? 'Edit ' + p.name : 'New entry';
     $('#entry-cancel').hidden = !p;
     var today = state.today;
@@ -194,7 +237,8 @@
         form[k].value = p[k] || '';
       });
       form.extensions.value = (p.extensions || []).join(', ');
-      $('input[name=type][value=' + p.type + ']', form).checked = true;
+      var radio = $('input[name=type][value=' + p.type + ']', form) || $('input[name=type][value=admission]', form);
+      radio.checked = true;
     }
     syncFields();
     if (p) {
@@ -233,7 +277,17 @@
     }
     var wasEditing = !!editing;
     var who = rec.name || (t === 'carried' ? 'the discharge' : '');
-    save('savePatient', rec, wasEditing ? 'Updated ' + who + '.' : 'Saved ' + who + '. The IP Report is updated.').then(function () {
+    // Patients sharing the room, entered together: each is saved as its own admission in the same room.
+    var sharers = t === 'admission' && !wasEditing ? $$('#sharers input').map(function (i) { return i.value.trim(); }).filter(function (n) { return n; }) : [];
+    if (sharers.length) rec.share = true;
+    var chain = save('savePatient', rec, wasEditing ? 'Updated ' + who + '.' : 'Saved ' + who + '. The IP Report is updated.');
+    sharers.forEach(function (name, i) {
+      chain = chain.then(function () {
+        var extra = Object.assign({}, rec, { id: '', name: name, share: true });
+        return save('savePatient', extra, 'Saved ' + (i + 2) + ' patients sharing room ' + rec.room + '. The IP Report is updated.');
+      });
+    });
+    chain.then(function () {
       resetForm();
       if (wasEditing) showTab('patients');
     }, function () {});
@@ -383,19 +437,22 @@
     var date = $('#rooms-date').value || state.today;
     var r = Calc.roomBoard(date, state.categories, state.patients, state.blocks).filter(function (x) { return x.room === tile.dataset.room; })[0];
     if (r.patients.length) {
-      var p = r.patients[0];
-      var others = r.patients.slice(1).map(function (x) { return x.name; });
-      ask('Room ' + r.room + ': ' + r.patients.map(function (x) { return x.name; }).join(' and '),
-        '<p>Admitted ' + fmtDate(p.admission) + (p.plannedDischarge ? ', planned discharge ' + fmtDate(p.plannedDischarge) : '') + '.</p>' +
-        '<label>Action <select name="act"><option value="discharge">Discharge ' + esc(p.name) + '</option>' +
-        '<option value="extend">Extend ' + esc(p.name) + '</option>' +
-        (others.length ? '<option value="discharge2">Discharge ' + esc(others[0]) + '</option>' : '') +
-        (r.patients.length < 2 ? '<option value="share">Admit a second patient (sharing)</option>' : '') + '</select></label>',
+      // Every patient sharing the room is listed, each with their own discharge / extend.
+      var list = r.patients.map(function (x) {
+        return '<li><b>' + esc(x.name) + '</b>: admitted ' + fmtDate(x.admission) +
+          (x.plannedDischarge ? ', planned discharge ' + fmtDate(x.plannedDischarge) : '') + '</li>';
+      }).join('');
+      var opts = r.patients.map(function (x, i) {
+        return '<option value="discharge:' + i + '">Discharge ' + esc(x.name) + '</option><option value="extend:' + i + '">Extend ' + esc(x.name) + '</option>';
+      }).join('');
+      ask('Room ' + r.room + ': ' + r.patients.length + (r.patients.length === 1 ? ' patient' : ' patients sharing'),
+        '<ul class="occupants">' + list + '</ul>' +
+        '<label>Action <select name="act">' + opts + '<option value="share">Admit another patient to share this room</option></select></label>',
         function (v) {
-          if (v.act === 'discharge') discharge(p);
-          else if (v.act === 'extend') extend(p);
-          else if (v.act === 'discharge2') discharge(r.patients[1]);
-          else if (v.act === 'share') admitTo(r.room, date, true);
+          var a = v.act.split(':');
+          if (a[0] === 'discharge') discharge(r.patients[+a[1]]);
+          else if (a[0] === 'extend') extend(r.patients[+a[1]]);
+          else if (a[0] === 'share') admitTo(r.room, date, true);
         });
     } else if (r.status === 'out') {
       ask('Room ' + r.room + ' is out of service', '<p>' + esc(r.block.reason || '') + '</p><label class="check"><input type="checkbox" name="back"> Put it back in service from ' + fmtDate(date) + '</label>',
@@ -423,9 +480,47 @@
     syncFields();
     form.room.value = room;
     form.share.checked = share;
+    showOccupants();
     showTab('entry');
     form.name.focus();
   }
+
+  /* ---------- date-wise admissions and discharges ---------- */
+
+  function renderDatewise() {
+    var date = $('#dw-date').value || state.today;
+    $('#dw-date').value = date;
+    var admitted = state.patients.filter(function (p) { return Calc.isAdmitted(p) && p.admission === date; });
+    var discharged = state.patients.filter(function (p) { return (Calc.isAdmitted(p) || Calc.isCarried(p)) && p.discharge === date; });
+    var byName = function (a, b) { return String(a.name).localeCompare(String(b.name)); };
+    admitted.sort(byName); discharged.sort(byName);
+
+    $('#dw-summary').innerHTML = [['Date', fmtDate(date)], ['Admissions', admitted.length], ['Discharges', discharged.length]]
+      .map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('');
+
+    $('#dw-adm').innerHTML = '<thead><tr><th>#</th><th>Patient</th><th>Source</th><th>Room</th><th>Category</th><th>Planned discharge</th><th>Status</th><th>Notes</th></tr></thead><tbody>' +
+      (admitted.map(function (p, i) {
+        return '<tr><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.source) + '</td><td>' + esc(p.room) + '</td><td>' +
+          esc(catOf(p.room)) + '</td><td>' + short(p.plannedDischarge) + '</td><td>' + esc(stateOf(p)) +
+          (p.discharge ? ' ' + short(p.discharge) : '') + '</td><td>' + esc(p.notes) + '</td></tr>';
+      }).join('') || '<tr><td colspan="8" class="empty">No admissions on this date.</td></tr>') + '</tbody>';
+
+    $('#dw-dis').innerHTML = '<thead><tr><th>#</th><th>Patient</th><th>Room</th><th>Category</th><th>Admitted</th><th>Nights</th><th>Room vacated</th><th>Notes</th></tr></thead><tbody>' +
+      (discharged.map(function (p, i) {
+        var carried = Calc.isCarried(p);
+        var nights = carried ? '' : Math.round((Date.parse(p.discharge) - Date.parse(p.admission)) / 864e5);
+        var vacated = carried ? (/^yes$/i.test(p.roomFreed) ? 'Yes' : 'No (sharing)') : (sharedOn(p) ? 'No (sharing)' : 'Yes');
+        return '<tr><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.room) + '</td><td>' + esc(catOf(p.room)) + '</td><td>' +
+          (carried ? 'Before 1 Oct' : short(p.admission)) + '</td><td>' + nights + '</td><td>' + vacated + '</td><td>' + esc(p.notes) + '</td></tr>';
+      }).join('') || '<tr><td colspan="8" class="empty">No discharges on this date.</td></tr>') + '</tbody>';
+  }
+  // True when other patients stay on in this patient's room after they leave.
+  function sharedOn(p) {
+    return state.patients.some(function (o) { return o.id !== p.id && o.room === p.room && Calc.inHouseOn(o, p.discharge); });
+  }
+  $('#dw-date').addEventListener('change', renderDatewise);
+  $('#dw-prev').addEventListener('click', function () { $('#dw-date').value = Calc.addDays($('#dw-date').value || state.today, -1); renderDatewise(); });
+  $('#dw-next').addEventListener('click', function () { $('#dw-date').value = Calc.addDays($('#dw-date').value || state.today, 1); renderDatewise(); });
 
   /* ---------- report ---------- */
 

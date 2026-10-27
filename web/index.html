@@ -15,6 +15,7 @@
     <span id="mode" class="mode"></span>
     <nav id="tabs">
       <button data-tab="entry" class="active">New entry</button>
+      <button data-tab="datewise">Date-wise</button>
       <button data-tab="patients">Patients</button>
       <button data-tab="rooms">Rooms</button>
       <button data-tab="report">Report</button>
@@ -28,33 +29,51 @@
       <form id="entry" class="card" autocomplete="off">
         <h2 id="entry-title">New entry</h2>
         <input type="hidden" name="id">
+        <!-- Not shown on the form; kept so editing an entry saves these stored values unchanged. -->
+        <input type="hidden" name="phone">
+        <input type="hidden" name="visitDate">
+        <input type="hidden" name="plannedAdmission">
         <fieldset class="types">
           <label><input type="radio" name="type" value="admission" checked> Admission</label>
-          <label><input type="radio" name="type" value="visit"> Walk-in visit (not admitted)</label>
-          <label><input type="radio" name="type" value="booking"> Booking (planned admission)</label>
           <label><input type="radio" name="type" value="carried"> Discharge (admitted before 1 Oct)</label>
         </fieldset>
         <div class="grid">
           <label>Patient name <input name="name"></label>
-          <label data-for="visit booking admission">Phone <input name="phone" inputmode="tel"></label>
-          <label data-for="visit booking admission">Source <select name="source"></select></label>
-          <label data-for="visit booking">Visit / booking date <input type="date" name="visitDate"></label>
-          <label data-for="booking admission">Planned admission <input type="date" name="plannedAdmission"></label>
+          <label data-for="admission">Source <select name="source"></select></label>
           <label data-for="admission">Admission date <input type="date" name="admission"></label>
           <label data-for="admission carried">Room <select name="room"></select></label>
-          <label data-for="booking admission">Planned discharge <input type="date" name="plannedDischarge"></label>
+          <label data-for="admission">Planned discharge <input type="date" name="plannedDischarge"></label>
           <label data-for="admission carried" class="edit-only">Discharge date <input type="date" name="discharge"></label>
           <label data-for="admission" class="edit-only">Stay extended on <input name="extensions" placeholder="yyyy-mm-dd, yyyy-mm-dd"></label>
         </div>
         <p data-for="carried" class="hint">For a patient who was already in on 30 Sep (one of the 49). Takes 1 off patients in house from the discharge date.</p>
         <label data-for="carried" class="check"><input type="checkbox" name="roomFreed" checked> The room is now empty: choose the room above, and its category goes down by 1 (untick if the patient was sharing and the room is still occupied)</label>
-        <label data-for="admission" class="check"><input type="checkbox" name="share"> Sharing a room (a second patient in an occupied room)</label>
+        <div data-for="admission" class="share-box">
+          <p id="room-occupants" class="hint" hidden></p>
+          <label class="check"><input type="checkbox" name="share"> Sharing a room (add to the patients already in this room; any number can share)</label>
+          <div id="sharers" class="sharers"></div>
+          <button type="button" id="add-sharer" class="edit-hide">+ Add another patient sharing this room</button>
+        </div>
         <label>Notes <textarea name="notes" rows="2"></textarea></label>
         <div class="actions">
           <button type="submit" class="primary">Save</button>
           <button type="button" id="entry-cancel" hidden>Cancel</button>
         </div>
       </form>
+    </section>
+
+    <!-- Date-wise admissions and discharges -->
+    <section id="tab-datewise" class="tab" hidden>
+      <div class="toolbar">
+        <label>Date <input type="date" id="dw-date"></label>
+        <button type="button" id="dw-prev">&lsaquo; Previous day</button>
+        <button type="button" id="dw-next">Next day &rsaquo;</button>
+      </div>
+      <div id="dw-summary" class="cards"></div>
+      <h3>Admissions</h3>
+      <div class="table-wrap"><table id="dw-adm" class="list"></table></div>
+      <h3>Discharges</h3>
+      <div class="table-wrap"><table id="dw-dis" class="list"></table></div>
     </section>
 
     <!-- Patients -->

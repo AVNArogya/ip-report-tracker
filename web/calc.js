@@ -396,10 +396,10 @@ var Calc = (function () {
     }
     if (p.type === 'admission' && p.admission && idx.byRoom[p.room]) {
       var clash = others.filter(function (o) { return o.id !== p.id && isAdmitted(o) && o.room === p.room && overlaps(o, p); });
-      if (clash.length >= 2) errors.push('Room ' + p.room + ' already has two patients then.');
-      else if (clash.length === 1 && !p.share) {
-        errors.push('Room ' + p.room + ' is occupied by ' + clash[0].name + ' from ' + clash[0].admission +
-          (clash[0].discharge ? ' to ' + clash[0].discharge : '') + '. Tick "sharing a room" to put both patients in it.');
+      // Any number of patients can share a room, as long as "sharing a room" is ticked.
+      if (clash.length && !p.share) {
+        errors.push('Room ' + p.room + ' is occupied by ' + clash.map(function (o) { return o.name; }).join(', ') + ' from ' + clash[0].admission +
+          (clash[0].discharge ? ' to ' + clash[0].discharge : '') + '. Tick "sharing a room" to put this patient in it as well.');
       }
       var blocked = (blocks || []).filter(function (b) {
         return b.room === p.room && b.from < stayEnd(p) && (!b.until || b.until >= p.admission);

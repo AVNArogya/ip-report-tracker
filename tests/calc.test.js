@@ -210,3 +210,14 @@ test('30 Sep starting figures match the old Daily IP Report', () => {
   // ...and they are still counted on 2 Oct (cumulative), with nothing new entered.
   assert.strictEqual(Calc.day('2026-10-02', cats, p, [], {})['occ:Economy'], 12);
 });
+
+test('three or more patients can share a room when sharing is ticked', () => {
+  const two = [admit('1', '601', '2026-10-05'), admit('2', '601', '2026-10-05')];
+  const third = Calc.checkPatient({ name: 'C', source: WALK, type: 'admission', admission: '2026-10-06', room: '601', share: true }, two, cats, []);
+  assert.deepStrictEqual(third.errors, []);
+  const noTick = Calc.checkPatient({ name: 'C', source: WALK, type: 'admission', admission: '2026-10-06', room: '601' }, two, cats, []);
+  assert.match(noTick.errors.join(' '), /Tick "sharing a room"/);
+  const v = Calc.day('2026-10-06', cats, two.concat(admit('3', '601', '2026-10-06')), [], {});
+  assert.strictEqual(v['occ:Deluxe villa'], 2 + 1);   // 2 from 30 Sep + room 601 once
+  assert.strictEqual(v.sharing, 2 + 2);               // 2 from 30 Sep + 2 extra patients in 601
+});

@@ -68,3 +68,9 @@ dialog h3 { margin-top: 0; }
   nav { margin-left: 0; width: 100%; }
   nav button { flex: 1; padding: 6px 4px; }
 }
+.share-box { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.share-box .check { margin-bottom: 6px; }
+.sharers { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.sharer { display: flex; gap: 6px; }
+.sharer input { flex: 1; }
+ul.occupants { padding-left: 18px; margin: 0 0 10px; }
