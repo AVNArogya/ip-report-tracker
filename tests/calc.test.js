@@ -221,3 +221,49 @@ test('three or more patients can share a room when sharing is ticked', () => {
   assert.strictEqual(v['occ:Deluxe villa'], 2 + 1);   // 2 from 30 Sep + room 601 once
   assert.strictEqual(v.sharing, 2 + 2);               // 2 from 30 Sep + 2 extra patients in 601
 });
+
+test('room change JF1 → JF2 moves the room count on the change date, not the admission', () => {
+  const p = admit('p1', 'JF1', '2026-10-10', { plannedDischarge: '2026-10-20' });
+  const move = { id: 'p1/move/1', type: 'move', name: 'P', room: 'JF2', visitDate: '2026-10-15' };
+  const res = Calc.checkPatient(move, [p], cats, []);
+  assert.deepStrictEqual(res.errors, []);
+  const list = [p, res.patient];
+  const before = Calc.day('2026-10-14', cats, list, [], {});
+  const moved = Calc.day('2026-10-15', cats, list, [], {});
+  const without = Calc.day('2026-10-15', cats, [p], [], {});
+  // Same totals as with no room change; same category here (JF1 and JF2 are both Executive JF).
+  ['admitted', 'discharged', 'inHousePatients', 'totalOccupied', 'inHouseOccupied', 'occ:Executive (J block)'].forEach(k => assert.strictEqual(moved[k], without[k], k));
+  assert.strictEqual(moved.admitted, 0);
+  assert.strictEqual(Calc.day('2026-10-10', cats, list, [], {}).admitted, 1);
+  assert.strictEqual(Calc.day('2026-10-10', cats, list, [], {})['adm:Executive (J block)'], 1);
+  // Room board: JF1 on the 14th, JF2 from the 15th.
+  const room = (d, r) => Calc.roomBoard(d, cats, list, []).find(x => x.room === r).patients.length;
+  assert.deepStrictEqual([room('2026-10-14', 'JF1'), room('2026-10-14', 'JF2'), room('2026-10-15', 'JF1'), room('2026-10-15', 'JF2')], [1, 0, 0, 1]);
+  assert.strictEqual(before.inHousePatients, moved.inHousePatients);
+});
+
+test('room change to another category: old category down, new category up from that date', () => {
+  const p = admit('p1', 'J 3', '2026-10-10');
+  const list = [p, { id: 'p1/move/1', type: 'move', name: 'P', room: '101', visitDate: '2026-10-12' }];
+  const d11 = Calc.day('2026-10-11', cats, list, [], {}), d12 = Calc.day('2026-10-12', cats, list, [], {});
+  assert.strictEqual(d11['occ:Economy'], 11); assert.strictEqual(d11['occ:Executive (S block)'], 21);
+  assert.strictEqual(d12['occ:Economy'], 10); assert.strictEqual(d12['occ:Executive (S block)'], 22);
+  assert.strictEqual(d12.admitted, 0); assert.strictEqual(d12.discharged, 0);
+  assert.strictEqual(d12['adm:Executive (S block)'], 0);
+  assert.strictEqual(d11.totalOccupied, d12.totalOccupied);
+  // The freed room can take a new patient from the 12th; the new room is taken.
+  assert.deepStrictEqual(Calc.checkPatient({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-12', room: 'J 3' }, list, cats, []).errors, []);
+  assert.match(Calc.checkPatient({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-12', room: '101' }, list, cats, []).errors.join(' '), /occupied/);
+});
+
+test('room change checks', () => {
+  const p = admit('p1', 'J 3', '2026-10-10', { discharge: '2026-10-14' });
+  const q = admit('q1', '101', '2026-10-10');
+  const chk = m => Calc.checkPatient(Object.assign({ type: 'move', id: 'p1/move/1' }, m), [p, q], cats, []).errors.join(' ');
+  assert.match(chk({ room: 'J 4', visitDate: '2026-10-10' }), /after the admission date/);
+  assert.match(chk({ room: 'J 4', visitDate: '2026-10-14' }), /not in house/);
+  assert.match(chk({ room: 'J 3', visitDate: '2026-10-12' }), /already in room/);
+  assert.match(chk({ room: '101', visitDate: '2026-10-12' }), /Tick "sharing a room"/);
+  assert.strictEqual(chk({ room: '101', visitDate: '2026-10-12', share: true }), '');
+  assert.match(chk({ room: 'J 4', visitDate: '2026-10-12', id: 'zz/move/1' }), /Choose the patient/);
+});

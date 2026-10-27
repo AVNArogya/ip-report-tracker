@@ -200,5 +200,21 @@ assert.strictEqual(rooms.get(12, 1), 'Hotel rooms');
 assert.strictEqual(rooms.get(13, 1), 'Total');
 assert.strictEqual(rooms.get(20, 1), '', 'old per-room rows cleared');
 
+// Room change: a new row, the admission row untouched, counts move from the change date.
+res = post('savePatient', { type: 'admission', name: 'Mover', source: 'Corporate', admission: '2026-10-10', room: 'JF1' });
+assert.ok(res.ok, res.error);
+const mover = res.data.patients.find(p => p.name === 'Mover');
+const admBefore = val('2026-10-10', 'admitted'), occJ = val('2026-10-12', 'occ:Executive (J block)'), occS = val('2026-10-12', 'occ:Executive (S block)');
+res = post('savePatient', { id: mover.id + '/move/x1', type: 'move', room: '101', visitDate: '2026-10-12' });
+assert.ok(res.ok, res.error);
+const moverAfter = res.data.patients.find(p => p.id === mover.id);
+assert.strictEqual(moverAfter.room, 'JF1'); assert.strictEqual(moverAfter.admission, '2026-10-10');
+assert.strictEqual(val('2026-10-10', 'admitted'), admBefore);
+assert.strictEqual(val('2026-10-12', 'admitted'), 0);
+assert.strictEqual(val('2026-10-11', 'occ:Executive (J block)'), occJ);
+assert.strictEqual(val('2026-10-12', 'occ:Executive (J block)'), occJ - 1);
+assert.strictEqual(val('2026-10-12', 'occ:Executive (S block)'), occS + 1);
+assert.strictEqual(res.data.patients.find(p => p.type === 'move').category, 'Executive (S block)');
+
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

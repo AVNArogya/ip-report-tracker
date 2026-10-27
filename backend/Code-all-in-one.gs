@@ -36,7 +36,7 @@ var Calc = (function () {
   };
   OPENING.rooms = Object.keys(OPENING.byCategory).reduce(function (a, k) { return a + OPENING.byCategory[k]; }, 0); // 47
   var OPENING_DATE = OPENING.date;
-  var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission', carried: 'Discharge (admitted before 1 Oct)' };
+  var TYPES = { visit: 'Walk-in visit', booking: 'Booking', admission: 'Admission', carried: 'Discharge (admitted before 1 Oct)', move: 'Room change' };
   function isCarried(p) { return p.type === 'carried' && !!p.discharge; }
   function yes(v) { return v === true || /^(yes|true|y|1)$/i.test(String(v || '').trim()); }
 
@@ -194,6 +194,42 @@ var Calc = (function () {
   function inHouseOn(p, d) { return isAdmitted(p) && p.admission <= d && (!p.discharge || p.discharge > d); }
   function blockedOn(b, d) { return b.from && b.from <= d && (!b.until || b.until >= d); }
 
+  // Room changes. A move is its own row: type 'move', id '<patient id>/move/<n>', room = the new room,
+  // visitDate = the date of the change. The patient's admission row keeps its original room, so the
+  // admission (date, count, category admitted into) never changes; from the move date on, the patient
+  // counts in the new room and its category.
+  var MOVE_SEP = '/move/';
+  function isMove(m) { return m.type === 'move' && !!m.visitDate && !!m.room; }
+  function movedPatientId(m) { return String(m.id || '').split(MOVE_SEP)[0]; }
+  // { patient id: [moves by date] }
+  function movesByPatient(patients) {
+    var by = {};
+    patients.forEach(function (m) {
+      if (isMove(m)) (by[movedPatientId(m)] = by[movedPatientId(m)] || []).push(m);
+    });
+    Object.keys(by).forEach(function (k) {
+      by[k].sort(function (a, b) { return a.visitDate < b.visitDate ? -1 : a.visitDate > b.visitDate ? 1 : String(a.id).localeCompare(String(b.id)); });
+    });
+    return by;
+  }
+  // The patient's room at the end of day d (their admission room until their first move).
+  function roomOn(p, d, moves) {
+    var room = p.room;
+    ((moves || {})[p.id] || []).forEach(function (m) { if (m.visitDate <= d) room = m.room; });
+    return room;
+  }
+  // The patient's stay as [{ room, from, to }] pieces, to = the day they left that room.
+  function staySegments(p, moves) {
+    var segs = [{ room: p.room, from: p.admission, to: stayEnd(p) }];
+    ((moves || {})[p.id] || []).forEach(function (m) {
+      var last = segs[segs.length - 1];
+      if (m.visitDate < last.from || m.visitDate >= stayEnd(p)) return;
+      last.to = m.visitDate;
+      segs.push({ room: m.room, from: m.visitDate, to: stayEnd(p) });
+    });
+    return segs;
+  }
+
   // All counts for one date. Values only; the 'formula' columns are worked out here too so the app
   // can show them, and the sheet replaces them with formulas linked to Room Categories.
   function day(d, cats, patients, blocks, plan) {
@@ -208,6 +244,7 @@ var Calc = (function () {
     v.plan = plan && plan[d] !== undefined && plan[d] !== '' ? Number(plan[d]) : '';
 
     var inRoom = {}; // room → patients in house tonight
+    var moves = movesByPatient(patients);
     var counted = d > OPENING_DATE; // the 30 Sep row shows the fixed position, not the day's movements
     var carriedOut = 0, freedByCat = {}, freedNoCat = 0;
     patients.forEach(function (p) {
@@ -243,7 +280,8 @@ var Calc = (function () {
       if (counted && (p.extensions || []).indexOf(d) >= 0) v.extended++;
       if (inHouseOn(p, d)) {
         v.inHousePatients++;
-        (inRoom[p.room] = inRoom[p.room] || []).push(p);
+        var tonightRoom = roomOn(p, d, moves); // after any room change
+        (inRoom[tonightRoom] = inRoom[tonightRoom] || []).push(p);
         if (p.plannedDischarge === tomorrow) v.dischargesConfirmed++;
       }
     });
@@ -324,9 +362,10 @@ var Calc = (function () {
   // [{ room, category, status, patients, block }]; status: available | occupied | admitted | discharged | out.
   function roomBoard(d, cats, patients, blocks) {
     var out = [];
+    var moves = movesByPatient(patients);
     cats.forEach(function (c) {
       c.rooms.forEach(function (room) {
-        var here = patients.filter(function (p) { return isAdmitted(p) && p.room === room; });
+        var here = patients.filter(function (p) { return isAdmitted(p) && roomOn(p, d, moves) === room; });
         var tonight = here.filter(function (p) { return inHouseOn(p, d); });
         var leaving = here.filter(function (p) { return p.discharge === d; });
         var block = (blocks || []).filter(function (b) { return b.room === room && blockedOn(b, d); })[0] || null;
@@ -368,6 +407,7 @@ var Calc = (function () {
     };
     var errors = [];
     if (!p.type) errors.push('Choose walk-in visit, booking, admission or discharge.');
+    if (p.type === 'move') return checkMove(p, others, idx, blocks);
     if (p.type === 'carried') {
       // A patient already in house on 30 Sep leaving: only the discharge date is needed.
       if (!p.name) p.name = 'Admitted before ' + addDays(OPENING_DATE, 1);
@@ -397,7 +437,14 @@ var Calc = (function () {
       if (!p.visitDate) p.visitDate = p.plannedAdmission;
     }
     if (p.type === 'admission' && p.admission && idx.byRoom[p.room]) {
-      var clash = others.filter(function (o) { return o.id !== p.id && isAdmitted(o) && o.room === p.room && overlaps(o, p); });
+      var moves = movesByPatient(others);
+      // Others in the same room at the same time as this patient (room changes included on both sides).
+      var mine = staySegments(p, moves);
+      var clash = others.filter(function (o) {
+        return o.id !== p.id && isAdmitted(o) && staySegments(o, moves).some(function (s) {
+          return mine.some(function (t) { return s.room === t.room && s.from < t.to && t.from < s.to; });
+        });
+      });
       // Any number of patients can share a room, as long as "sharing a room" is ticked.
       if (clash.length && !p.share) {
         errors.push('Room ' + p.room + ' is occupied by ' + clash.map(function (o) { return o.name; }).join(', ') + ' from ' + clash[0].admission +
@@ -410,6 +457,39 @@ var Calc = (function () {
     }
     delete p.share;
     return { patient: p, errors: errors };
+  }
+
+  // A room change: the patient must be in house on that date, and the new room free (or "sharing" ticked).
+  function checkMove(m, others, idx, blocks) {
+    var errors = [];
+    var pid = movedPatientId(m);
+    var p = others.filter(function (o) { return o.id === pid && isAdmitted(o); })[0];
+    var moves = movesByPatient(others.filter(function (o) { return o.id !== m.id; }));
+    if (!p || m.id.indexOf(MOVE_SEP) < 0) errors.push('Choose the patient whose room is changing.');
+    if (!m.visitDate) errors.push('Enter the date of the room change.');
+    if (!m.room) errors.push('Choose the new room.');
+    else if (!idx.byRoom[m.room]) errors.push('Room ' + m.room + ' is not in the Room Categories tab.');
+    if (p && m.visitDate) {
+      if (m.visitDate <= p.admission) errors.push('The room change must be after the admission date (' + p.admission + '). To fix the admission room, use Edit.');
+      else if (!inHouseOn(p, addDays(m.visitDate, -1)) || (p.discharge && m.visitDate >= p.discharge)) errors.push(p.name + ' is not in house on ' + m.visitDate + '.');
+      else if (roomOn(p, m.visitDate, moves) === m.room) errors.push(p.name + ' is already in room ' + m.room + ' on that date.');
+    }
+    if (p && m.visitDate && m.room && idx.byRoom[m.room] && !errors.length) {
+      var here = others.filter(function (o) {
+        return o.id !== p.id && inHouseOn(o, m.visitDate) && roomOn(o, m.visitDate, moves) === m.room;
+      });
+      if (here.length && !m.share) {
+        errors.push('Room ' + m.room + ' is occupied by ' + here.map(function (o) { return o.name; }).join(', ') +
+          ' on ' + m.visitDate + '. Tick "sharing a room" to move the patient in with them.');
+      }
+      var blocked = (blocks || []).filter(function (b) { return b.room === m.room && blockedOn(b, m.visitDate); })[0];
+      if (blocked) errors.push('Room ' + m.room + ' is out of service on ' + m.visitDate + '.');
+    }
+    if (p) m.name = p.name;
+    m.source = ''; m.admission = null; m.plannedAdmission = null; m.plannedDischarge = null; m.discharge = null;
+    m.extensions = []; m.roomFreed = '';
+    delete m.share;
+    return { patient: m, errors: errors };
   }
 
   function checkBlock(input, cats) {
@@ -427,7 +507,8 @@ var Calc = (function () {
     addDays: addDays, datesBetween: datesBetween, toIso: toIso, splitRooms: splitRooms, isInHouse: isInHouse,
     parseCategories: parseCategories, categoryRows: categoryRows, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
     columns: columns, day: day, report: report, reportRange: reportRange, roomBoard: roomBoard,
-    inHouseOn: inHouseOn, isAdmitted: isAdmitted, checkPatient: checkPatient, checkBlock: checkBlock
+    inHouseOn: inHouseOn, isAdmitted: isAdmitted, isMove: isMove, MOVE_SEP: MOVE_SEP, movedPatientId: movedPatientId,
+    movesByPatient: movesByPatient, roomOn: roomOn, checkPatient: checkPatient, checkBlock: checkBlock
   };
 })();
 
@@ -670,7 +751,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 7;
+var BACKEND_VERSION = 8;
 
 function readAll_() {
   return {

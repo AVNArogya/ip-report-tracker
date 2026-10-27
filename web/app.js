@@ -79,7 +79,9 @@
       if (res.errors.length) throw new Error(res.errors.join(' '));
       saved = res.patient;
       saved.category = catOf(saved.room);
-      if (!saved.id) { saved.id = id(); d.patients.push(saved); }
+      if (!saved.id) saved.id = id();
+      // A new entry can arrive with its id already set (a room change); add it like the sheet does.
+      if (!d.patients.some(function (p) { return p.id === saved.id; })) d.patients.push(saved);
       else d.patients = d.patients.map(function (p) { return p.id === saved.id ? saved : p; });
     } else if (action === 'deletePatient') {
       d.patients = d.patients.filter(function (p) { return p.id !== rec.id; });
@@ -119,7 +121,18 @@
     state.blocks = data.blocks || [];
     state.plan = data.plan || {};
     state.today = data.today || localToday();
+    state.version = DEMO ? ROOM_CHANGE_VERSION : data.version || 0;
     renderAll();
+  }
+  var ROOM_CHANGE_VERSION = 8; // sheet code that counts room changes
+  // Moves by patient, and each patient's room on a date (after any room change).
+  function allMoves() { return Calc.movesByPatient(state.patients); }
+  function roomOf(p, d) { return Calc.roomOn(p, d, allMoves()); }
+  // Where the patient is now: today, or their last night if already discharged.
+  function currentRoom(p) {
+    if (!Calc.isAdmitted(p)) return p.room;
+    var d = p.discharge && p.discharge <= state.today ? Calc.addDays(p.discharge, -1) : state.today;
+    return roomOf(p, d < p.admission ? p.admission : d);
   }
   function save(action, record, okMsg) {
     status('Saving…');
@@ -171,7 +184,7 @@
   // Who is already in the chosen room on the admission date. An occupied room means this patient shares it.
   function occupantsOf(room, date) {
     return state.patients.filter(function (p) {
-      return p.room === room && (!editing || p.id !== editing.id) && Calc.inHouseOn(p, date);
+      return (!editing || p.id !== editing.id) && Calc.inHouseOn(p, date) && roomOf(p, date) === room;
     });
   }
   function showOccupants() {
@@ -318,7 +331,7 @@
   }
 
   function discharge(p) {
-    ask('Discharge ' + p.name + ' (room ' + p.room + ')',
+    ask('Discharge ' + p.name + ' (room ' + currentRoom(p) + ')',
       '<label>Discharge date <input type="date" name="date" required value="' + state.today + '"></label>' +
       '<p class="hint">Counted as a discharge on this date; the room is free from this date.</p>',
       function (v) { save('savePatient', Object.assign({}, p, { discharge: v.date, share: sharing(p) }), p.name + ' discharged on ' + short(v.date) + '.'); });
@@ -369,6 +382,7 @@
   function renderPatients() {
     var q = $('#patient-search').value.trim().toLowerCase();
     var list = state.patients.filter(function (p) {
+      if (Calc.isMove(p)) return false; // room changes are shown with their patient, not as patients
       var s = stateOf(p);
       if (filter === 'inhouse' && s !== 'In house' && s !== 'Admission (future)') return false;
       if (filter === 'booking' && p.type !== 'booking') return false;
@@ -383,10 +397,15 @@
       var acts = [];
       if (p.type === 'visit' || p.type === 'booking') acts.push('<button data-a="admit">Admit</button>');
       if (s === 'In house') acts.push('<button data-a="discharge">Discharge</button>', '<button data-a="extend">Extend</button>');
-      acts.push('<button data-a="edit">Edit</button>', '<button data-a="delete" class="danger">Delete</button>');
+      acts.push('<button data-a="edit">Edit</button>');
+      if (s === 'In house') acts.push('<button data-a="roomChange">Room change</button>');
+      acts.push('<button data-a="delete" class="danger">Delete</button>');
+      var room = currentRoom(p);
+      var moved = (allMoves()[p.id] || []).length;
       return '<tr data-id="' + esc(p.id) + '"><td><b>' + esc(p.name) + '</b><br><small>' + esc(p.phone) + '</small></td>' +
         '<td>' + esc(s) + '</td><td>' + esc(p.source) + '</td>' +
-        '<td>' + esc(p.room) + '<br><small>' + esc(catOf(p.room)) + '</small></td>' +
+        '<td>' + esc(room) + '<br><small>' + esc(catOf(room)) + '</small>' +
+        (moved ? '<br><small>Admitted to ' + esc(p.room) + '; room changed ' + moved + (moved === 1 ? ' time' : ' times') + '</small>' : '') + '</td>' +
         '<td>' + (p.type === 'admission' ? 'Admitted ' + short(p.admission) : p.type === 'carried' ? 'Admitted before 1 Oct' : p.type === 'booking' ? 'Planned ' + short(p.plannedAdmission) : 'Visited ' + short(p.visitDate)) +
         (p.plannedDischarge ? '<br><small>Planned discharge ' + short(p.plannedDischarge) + '</small>' : '') +
         (p.discharge ? '<br><small>Discharged ' + short(p.discharge) + '</small>' : '') + '</td>' +
@@ -401,9 +420,48 @@
     var id = btn.closest('tr').dataset.id;
     var p = state.patients.filter(function (x) { return x.id === id; })[0];
     if (!p) return;
-    ({ admit: admitFrom, discharge: discharge, extend: extend, delete: remove,
+    ({ admit: admitFrom, discharge: discharge, extend: extend, delete: remove, roomChange: roomChange,
       edit: function (x) { resetForm(x); showTab('entry'); } })[btn.dataset.a](p);
   });
+
+  /* ---------- room change ---------- */
+
+  // Moves an in-house patient to another room from a date. The admission is not touched: the change is
+  // saved as its own entry, and from that date the room and category counts follow the new room.
+  function roomChange(p) {
+    if (state.version < ROOM_CHANGE_VERSION) {
+      status('Room change needs the latest Apps Script code in the Google Sheet (version ' + ROOM_CHANGE_VERSION + '): paste backend/Code-all-in-one.gs ' +
+        'from GitHub into Apps Script, Save, then Deploy → Manage deployments → Edit → New version → Deploy.', 'error');
+      return;
+    }
+    var mine = allMoves()[p.id] || [];
+    var date = state.today;
+    var now = roomOf(p, date);
+    var board = Calc.roomBoard(date, state.categories, state.patients, state.blocks);
+    var options = state.categories.map(function (c) {
+      return '<optgroup label="' + esc(c.name) + '">' + board.filter(function (r) { return r.category === c.name; }).map(function (r) {
+        var who = r.patients.filter(function (x) { return x.id !== p.id; }).map(function (x) { return x.name; });
+        var note = r.room === now ? ' (current room)' : r.status === 'out' ? ' (out of service)' : who.length ? ' (occupied: ' + who.join(', ') + ')' : '';
+        return '<option value="' + esc(r.room) + '"' + (r.room === now || r.status === 'out' ? ' disabled' : '') + '>' + esc(r.room + note) + '</option>';
+      }).join('') + '</optgroup>';
+    }).join('');
+    var history = '<li>Admitted ' + fmtDate(p.admission) + ' to ' + esc(p.room) + ' (' + esc(catOf(p.room)) + ')</li>' +
+      mine.map(function (m) { return '<li>' + fmtDate(m.visitDate) + ': moved to ' + esc(m.room) + ' (' + esc(catOf(m.room)) + ')</li>'; }).join('');
+    var last = mine[mine.length - 1];
+    ask('Room change: ' + p.name,
+      '<p>Now in room <b>' + esc(now) + '</b> (' + esc(catOf(now)) + ').</p><ul class="occupants">' + history + '</ul>' +
+      '<label>Date of room change <input type="date" name="date" required value="' + date + '" min="' + Calc.addDays(p.admission, 1) + '"></label>' +
+      '<label>New room <select name="room"><option value="">Choose the new room</option>' + options + '</select></label>' +
+      '<label class="check"><input type="checkbox" name="share"> Sharing a room (the new room already has patients)</label>' +
+      (last ? '<label class="check"><input type="checkbox" name="undo"> Undo the last room change instead (' + esc(last.room) + ' on ' + short(last.visitDate) + ')</label>' : '') +
+      '<p class="hint">The admission date and admission count stay the same. From this date the patient counts in the new room and its category instead of the old one.</p>',
+      function (v) {
+        if (v.undo) { save('deletePatient', { id: last.id }, 'Room change undone: ' + p.name + ' is back in ' + roomOf(p, Calc.addDays(last.visitDate, -1)) + '.'); return; }
+        if (!v.room) { status('Choose the new room.', 'error'); return; }
+        var move = { id: p.id + Calc.MOVE_SEP + Date.now().toString(36), type: 'move', name: p.name, room: v.room, visitDate: v.date, share: v.share };
+        save('savePatient', move, p.name + ' moved to room ' + v.room + ' from ' + short(v.date) + '. Room and category counts are updated.');
+      });
+  }
 
   /* ---------- room board ---------- */
 
@@ -510,13 +568,15 @@
         var carried = Calc.isCarried(p);
         var nights = carried ? '' : Math.round((Date.parse(p.discharge) - Date.parse(p.admission)) / 864e5);
         var vacated = carried ? (/^yes$/i.test(p.roomFreed) ? 'Yes' : 'No (sharing)') : (sharedOn(p) ? 'No (sharing)' : 'Yes');
-        return '<tr><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.room) + '</td><td>' + esc(catOf(p.room)) + '</td><td>' +
+        return '<tr><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(leftRoom(p)) + '</td><td>' + esc(catOf(leftRoom(p))) + '</td><td>' +
           (carried ? 'Before 1 Oct' : short(p.admission)) + '</td><td>' + nights + '</td><td>' + vacated + '</td><td>' + esc(p.notes) + '</td></tr>';
       }).join('') || '<tr><td colspan="8" class="empty">No discharges on this date.</td></tr>') + '</tbody>';
   }
   // True when other patients stay on in this patient's room after they leave.
+  // The room a discharged patient left from (after any room change; pre-October discharges keep their entry's room).
+  function leftRoom(p) { return Calc.isAdmitted(p) ? roomOf(p, Calc.addDays(p.discharge, -1)) : p.room; }
   function sharedOn(p) {
-    return state.patients.some(function (o) { return o.id !== p.id && o.room === p.room && Calc.inHouseOn(o, p.discharge); });
+    return state.patients.some(function (o) { return o.id !== p.id && Calc.inHouseOn(o, p.discharge) && roomOf(o, p.discharge) === roomOf(p, p.discharge); });
   }
   $('#dw-date').addEventListener('change', renderDatewise);
   $('#dw-prev').addEventListener('click', function () { $('#dw-date').value = Calc.addDays($('#dw-date').value || state.today, -1); renderDatewise(); });
