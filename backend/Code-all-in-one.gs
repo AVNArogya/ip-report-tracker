@@ -21,17 +21,17 @@ var Calc = (function () {
   var SOURCES = ['Walk-in (PCE)', 'Virtual (tele)', 'Corporate', 'Clinic referral (AVN clinics)', 'Other (patient referral)'];
   var WALK_IN = SOURCES[0];
 
-  // Position at the end of 30 Sep, fixed (brought forward from the old Daily IP Report, row "30 Sep"):
-  // rooms occupied in each category, and 49 patients in those 47 rooms (2 rooms had 2 patients).
-  // The report starts with this row; from 1 Oct each category carries forward: rooms admitted into are
-  // added, rooms vacated are taken away. A patient who was already in on 30 Sep is discharged with a
-  // 'carried' entry (no admission); with "room vacated" it frees a room in that room's category.
+  // Position at the end of 30 Sep, fixed (brought forward from the old Daily IP Report, row "30 Sep",
+  // with Executive S corrected to 22 and Apartment to 1): rooms occupied in each category, and
+  // 49 patients in those 47 rooms. The report starts with this row; from 1 Oct each day carries forward
+  // from the day before: rooms admitted into are added, rooms vacated are taken away. A patient who was
+  // already in on 30 Sep is discharged with a 'carried' entry (no admission); see carriedRooms().
   var OPENING = {
     date: '2026-09-30',
     patients: 49,
     byCategory: {
-      'Economy': 10, 'Executive (J block)': 6, 'Executive (S block)': 21, 'Deluxe': 1, 'Classic villa': 4,
-      'Deluxe villa': 2, 'Royal villa': 1, 'Apartment rooms': 2, 'Hotel rooms': 0
+      'Economy': 10, 'Executive (J block)': 6, 'Executive (S block)': 22, 'Deluxe': 1, 'Classic villa': 4,
+      'Deluxe villa': 2, 'Royal villa': 1, 'Apartment rooms': 1, 'Hotel rooms': 0
     }
   };
   OPENING.rooms = Object.keys(OPENING.byCategory).reduce(function (a, k) { return a + OPENING.byCategory[k]; }, 0); // 47
@@ -50,7 +50,7 @@ var Calc = (function () {
     ['Deluxe villa', 'Deluxe villa', 'SW', 'In-house', '601, 602, 603, 604'],
     ['Royal villa', 'Royal villa', 'SW', 'In-house', '701'],
     ['Apartment rooms', 'Apartment rooms', '', 'Apartment', '131, 132, 137, 138, 139, 140'],
-    ['Hotel rooms', 'Hotel rooms', '', 'Hotel', '1, 2']
+    ['Hotel rooms', 'Hotel rooms', '', 'Hotel', '171, 172']
   ];
 
   /* ---------- helpers ---------- */
@@ -79,6 +79,14 @@ var Calc = (function () {
   function roomName(v) { return String(v === null || v === undefined ? '' : v).trim().replace(/\s+/g, ' '); }
   function splitRooms(text) {
     return String(text || '').split(/[,\n]/).map(roomName).filter(function (r) { return r; });
+  }
+  // Hotel rooms 1 and 2 were renumbered 171 and 172. Entries saved with the old numbers are counted
+  // in the new rooms (the entries themselves are not changed), unless the Room Categories tab still lists them.
+  var ROOM_ALIASES = { '1': '171', '2': '172' };
+  function canonRoom(room, idx) {
+    room = roomName(room);
+    if (idx && idx.byRoom[room]) return room;
+    return ROOM_ALIASES[room] || room;
   }
   function isInHouse(cat) { return String(cat.location || '').toLowerCase() === 'in-house'; }
 
@@ -178,7 +186,6 @@ var Calc = (function () {
       { key: 'plannedVirtual', label: 'Planned admissions: virtual', kind: 'value' },
       { key: 'plannedOther', label: 'Planned admissions: corporate / clinic / other', kind: 'value' },
       // Totals across every room.
-      { key: 'walkInVisits', label: 'Walk-in visits (incl. not admitted)', kind: 'value' },
       { key: 'totalRooms', label: 'Total rooms', kind: 'formula' },
       { key: 'totalOccupied', label: 'Total rooms occupied', kind: 'value' },
       { key: 'totalOutOfService', label: 'Total rooms out of service', kind: 'value' },
@@ -219,15 +226,48 @@ var Calc = (function () {
     return room;
   }
   // The patient's stay as [{ room, from, to }] pieces, to = the day they left that room.
-  function staySegments(p, moves) {
-    var segs = [{ room: p.room, from: p.admission, to: stayEnd(p) }];
+  function staySegments(p, moves, idx) {
+    var segs = [{ room: canonRoom(p.room, idx), from: p.admission, to: stayEnd(p) }];
     ((moves || {})[p.id] || []).forEach(function (m) {
       var last = segs[segs.length - 1];
       if (m.visitDate < last.from || m.visitDate >= stayEnd(p)) return;
       last.to = m.visitDate;
-      segs.push({ room: m.room, from: m.visitDate, to: stayEnd(p) });
+      segs.push({ room: canonRoom(m.room, idx), from: m.visitDate, to: stayEnd(p) });
     });
     return segs;
+  }
+
+  // The 30 Sep patients and rooms still in house at the end of day d: { patients, rooms: { category: n } }.
+  // Discharges of 30 Sep patients are taken in date order. One frees a room in its room's category when
+  //   - "room vacated" is ticked, and
+  //   - no other 30 Sep patient recorded in the same room is still in after them (a shared room is
+  //     vacated by the last of its patients to leave), and
+  //   - that category still has a 30 Sep room left.
+  // The 30 Sep rooms counted never exceed the 30 Sep patients still in house; any surplus is released from
+  // the category holding the most, so the count reaches 0 when the last of them leaves.
+  function carriedRooms(d, cats, patients, idx) {
+    var rooms = {};
+    cats.forEach(function (c) { rooms[c.name] = OPENING.byCategory[c.name] || 0; });
+    var order = function (p) { return [p.discharge, String(p.created || ''), String(p.id || '')].join('|'); };
+    var out = patients.filter(isCarried).sort(function (a, b) { return order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : 0; });
+    var gone = 0;
+    out.forEach(function (p, i) {
+      if (p.discharge > d) return;
+      gone++;
+      var room = canonRoom(p.room, idx), cat = idx.byRoom[room];
+      if (!yes(p.roomFreed) || !cat || !(rooms[cat.name] > 0)) return;
+      var stillShared = out.some(function (q, j) { return j > i && canonRoom(q.room, idx) === room; });
+      if (stillShared) return;
+      rooms[cat.name]--;
+    });
+    var left = Math.max(0, OPENING.patients - gone);
+    var total = Object.keys(rooms).reduce(function (a, k) { return a + rooms[k]; }, 0);
+    while (total > left) {
+      var most = cats.reduce(function (m, c) { return rooms[c.name] > (m ? rooms[m.name] : 0) ? c : m; }, null);
+      rooms[most.name]--;
+      total--;
+    }
+    return { patients: left, rooms: rooms };
   }
 
   // All counts for one date. Values only; the 'formula' columns are worked out here too so the app
@@ -246,18 +286,10 @@ var Calc = (function () {
     var inRoom = {}; // room → patients in house tonight
     var moves = movesByPatient(patients);
     var counted = d > OPENING_DATE; // the 30 Sep row shows the fixed position, not the day's movements
-    var carriedOut = 0, freedByCat = {}, freedNoCat = 0;
     patients.forEach(function (p) {
-      var cat = idx.byRoom[p.room];
+      var cat = idx.byRoom[canonRoom(p.room, idx)];
       if (isCarried(p)) {
         if (counted && p.discharge === d) v.discharged++;
-        if (p.discharge <= d) {
-          carriedOut++;
-          if (yes(p.roomFreed)) {
-            if (cat) freedByCat[cat.name] = (freedByCat[cat.name] || 0) + 1;
-            else freedNoCat++;
-          }
-        }
         return;
       }
       if (counted && p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
@@ -280,7 +312,7 @@ var Calc = (function () {
       if (counted && (p.extensions || []).indexOf(d) >= 0) v.extended++;
       if (inHouseOn(p, d)) {
         v.inHousePatients++;
-        var tonightRoom = roomOn(p, d, moves); // after any room change
+        var tonightRoom = canonRoom(roomOn(p, d, moves), idx); // after any room change
         (inRoom[tonightRoom] = inRoom[tonightRoom] || []).push(p);
         if (p.plannedDischarge === tomorrow) v.dischargesConfirmed++;
       }
@@ -309,16 +341,15 @@ var Calc = (function () {
       }
     });
 
-    // Carry forward the 30 Sep rooms in each category, less those vacated since by patients from before 1 Oct.
+    // Carry forward the 30 Sep rooms still occupied by patients from before 1 Oct.
+    var carried = carriedRooms(d, cats, patients, idx);
     cats.forEach(function (c) {
-      var n = Math.max(0, (OPENING.byCategory[c.name] || 0) - (freedByCat[c.name] || 0));
+      var n = carried.rooms[c.name] || 0;
       v['occ:' + c.name] += n;
       occAll += n;
       if (isInHouse(c)) occInHouse += n;
     });
-    occAll -= freedNoCat;      // older entries with no room given: taken off the in-house totals
-    occInHouse -= freedNoCat;
-    v.inHousePatients += OPENING.patients - carriedOut;
+    v.inHousePatients += carried.patients;
     // As in the old report, patients in house = rooms occupied + patients sharing a room.
     v.sharing = Math.max(0, v.inHousePatients - occAll);
 
@@ -362,10 +393,11 @@ var Calc = (function () {
   // [{ room, category, status, patients, block }]; status: available | occupied | admitted | discharged | out.
   function roomBoard(d, cats, patients, blocks) {
     var out = [];
+    var idx = roomIndex(cats);
     var moves = movesByPatient(patients);
     cats.forEach(function (c) {
       c.rooms.forEach(function (room) {
-        var here = patients.filter(function (p) { return isAdmitted(p) && roomOn(p, d, moves) === room; });
+        var here = patients.filter(function (p) { return isAdmitted(p) && canonRoom(roomOn(p, d, moves), idx) === room; });
         var tonight = here.filter(function (p) { return inHouseOn(p, d); });
         var leaving = here.filter(function (p) { return p.discharge === d; });
         var block = (blocks || []).filter(function (b) { return b.room === room && blockedOn(b, d); })[0] || null;
@@ -396,7 +428,7 @@ var Calc = (function () {
       visitDate: toIso(input.visitDate),
       plannedAdmission: toIso(input.plannedAdmission),
       admission: toIso(input.admission),
-      room: roomName(input.room),
+      room: canonRoom(input.room, idx), // old hotel numbers become the new ones when an entry is saved
       plannedDischarge: toIso(input.plannedDischarge),
       extensions: (Array.isArray(input.extensions) ? input.extensions : String(input.extensions || '').split(','))
         .map(toIso).filter(function (x) { return x; }),
@@ -439,9 +471,9 @@ var Calc = (function () {
     if (p.type === 'admission' && p.admission && idx.byRoom[p.room]) {
       var moves = movesByPatient(others);
       // Others in the same room at the same time as this patient (room changes included on both sides).
-      var mine = staySegments(p, moves);
+      var mine = staySegments(p, moves, idx);
       var clash = others.filter(function (o) {
-        return o.id !== p.id && isAdmitted(o) && staySegments(o, moves).some(function (s) {
+        return o.id !== p.id && isAdmitted(o) && staySegments(o, moves, idx).some(function (s) {
           return mine.some(function (t) { return s.room === t.room && s.from < t.to && t.from < s.to; });
         });
       });
@@ -472,11 +504,11 @@ var Calc = (function () {
     if (p && m.visitDate) {
       if (m.visitDate <= p.admission) errors.push('The room change must be after the admission date (' + p.admission + '). To fix the admission room, use Edit.');
       else if (!inHouseOn(p, addDays(m.visitDate, -1)) || (p.discharge && m.visitDate >= p.discharge)) errors.push(p.name + ' is not in house on ' + m.visitDate + '.');
-      else if (roomOn(p, m.visitDate, moves) === m.room) errors.push(p.name + ' is already in room ' + m.room + ' on that date.');
+      else if (canonRoom(roomOn(p, m.visitDate, moves), idx) === m.room) errors.push(p.name + ' is already in room ' + m.room + ' on that date.');
     }
     if (p && m.visitDate && m.room && idx.byRoom[m.room] && !errors.length) {
       var here = others.filter(function (o) {
-        return o.id !== p.id && inHouseOn(o, m.visitDate) && roomOn(o, m.visitDate, moves) === m.room;
+        return o.id !== p.id && inHouseOn(o, m.visitDate) && canonRoom(roomOn(o, m.visitDate, moves), idx) === m.room;
       });
       if (here.length && !m.share) {
         errors.push('Room ' + m.room + ' is occupied by ' + here.map(function (o) { return o.name; }).join(', ') +
@@ -508,7 +540,7 @@ var Calc = (function () {
     parseCategories: parseCategories, categoryRows: categoryRows, defaultCategories: defaultCategories, roomIndex: roomIndex, blocksOf: blocksOf,
     columns: columns, day: day, report: report, reportRange: reportRange, roomBoard: roomBoard,
     inHouseOn: inHouseOn, isAdmitted: isAdmitted, isMove: isMove, MOVE_SEP: MOVE_SEP, movedPatientId: movedPatientId,
-    movesByPatient: movesByPatient, roomOn: roomOn, checkPatient: checkPatient, checkBlock: checkBlock
+    movesByPatient: movesByPatient, roomOn: roomOn, canonRoom: canonRoom, checkPatient: checkPatient, checkBlock: checkBlock
   };
 })();
 
@@ -628,6 +660,22 @@ function ensureTabs_() {
   var missing = [REPORT, ROOMS, PATIENTS, BLOCKS, PLAN].some(function (n) { return !ss.getSheetByName(n); });
   if (missing) setup();
   repairIds_();
+  renumberHotelRooms_();
+}
+
+// Hotel rooms 1 and 2 became 171 and 172 (28 Oct). Changes only that cell of Room Categories, and only while
+// it still reads exactly "1, 2". Entries saved with room 1 or 2 are counted in 171 / 172 (see Calc.canonRoom).
+function renumberHotelRooms_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
+  if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
+  var rows = sh.getRange(ROOMS_FIRST_ROW, 1, sh.getLastRow() - ROOMS_FIRST_ROW + 1, 5).getDisplayValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (/^hotel rooms$/i.test(String(rows[i][0]).trim()) && Calc.splitRooms(rows[i][4]).join(',') === '1,2') {
+      sh.getRange(ROOMS_FIRST_ROW + i, 5).setValue('171, 172');
+      refresh_();
+      return;
+    }
+  }
 }
 
 function doGet(e) {
@@ -792,7 +840,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 9;
+var BACKEND_VERSION = 10;
 
 function readAll_() {
   return {
@@ -963,7 +1011,6 @@ function writeReport_(rep, cats, layout) {
     ['Available rooms', '=A3-B3-D3'],
     ['Out of service', lookup_('"totalOutOfService"', width, '', REPORT_SHOW_CELL)],
     ['Walk-in (PCE) admitted', lookup_('"src:' + Calc.SOURCES[0] + '"', width, '', REPORT_SHOW_CELL)],
-    ['Walk-in visits', lookup_('"walkInVisits"', width, '', REPORT_SHOW_CELL)],
     ['Admitted', lookup_('"admitted"', width, '', REPORT_SHOW_CELL)],
     ['Discharged', lookup_('"discharged"', width, '', REPORT_SHOW_CELL)],
     ['Patients in house', lookup_('"inHousePatients"', width, '', REPORT_SHOW_CELL)],
@@ -974,7 +1021,7 @@ function writeReport_(rep, cats, layout) {
     .setFontWeight('bold').setWrap(true).setBackground(COLOURS.summary);
   sh.getRange(3, 1, 1, summary.length).setFormulas([summary.map(function (s) { return s[1]; })])
     .setFontSize(13).setFontWeight('bold').setHorizontalAlignment('center').setNumberFormat('0');
-  sh.getRange(3, 10).setNumberFormat('0%');
+  sh.getRange(3, summary.length).setNumberFormat('0%'); // In-house occupancy, the last summary item
   sh.getRange(4, 1).setValue('Category-wise occupied, available and admitted counts for this date are in the ' + ROOMS + ' tab.')
     .setFontColor('#666666');
 

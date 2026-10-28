@@ -143,9 +143,9 @@ assert.strictEqual(report.getLastRow(), 29);
 assert.strictEqual(report.get(6, keys['occ:Economy']), 'Economy (of 12)');
 assert.strictEqual(val('2026-10-20', 'admitted'), 1);
 assert.strictEqual(val('2026-10-20', 'src:Walk-in (PCE)'), 1);
-// Columns stop at AL (Total rooms available); per-category admitted / out of service are in Room Categories.
-assert.strictEqual(report.getLastColumn(), 38);
-assert.strictEqual(report.get(6, 38), 'Total rooms available');
+// Columns stop at AK (Total rooms available): walk-in visits removed; per-category admitted / out of service are in Room Categories.
+assert.strictEqual(report.getLastColumn(), 37);
+assert.strictEqual(report.get(6, 37), 'Total rooms available');
 assert.strictEqual(keys['adm:Economy'], undefined);
 report.set(1, 3, '2026-10-21'); // pick 21 Oct in C1
 ctx.onEdit({ range: { getSheet: () => report, getA1Notation: () => 'C1', getRow: () => 1, getColumn: () => 3 } });
@@ -153,7 +153,7 @@ assert.strictEqual(rooms.get(4 + 4, 10), 1, 'Classic villa admitted on 21 Oct');
 assert.strictEqual(rooms.get(4, 10), 0);
 report.set(1, 3, '');
 assert.strictEqual(val('2026-10-21', 'occ:Economy'), 11); // 10 from 30 Sep + Asha
-assert.strictEqual(val('2026-10-21', 'walkInVisits'), 1);
+assert.strictEqual(keys['walkInVisits'], undefined, 'walk-in visits column removed');
 assert.strictEqual(val('2026-10-21', 'totalOccupied'), 49); // 47 from 30 Sep + 2
 assert.strictEqual(val('2026-10-22', 'discharged'), 1);
 assert.strictEqual(val('2026-10-22', 'occ:Economy'), 10);
@@ -237,6 +237,17 @@ assert.strictEqual(post('savePlan', { date: '2026-10-22', plan: 61 }).data.patie
 // New ids are stored as text, never as numbers.
 res = post('savePatient', { type: 'admission', name: 'New one', source: 'Corporate', admission: '2026-10-21', room: 'J 10' });
 assert.match(res.data.patients.find(p => p.name === 'New one').id, /^p[0-9a-z]{7}$/);
+
+// Hotel rooms still listed as "1, 2" (as in the live sheet): the next request renumbers that one cell to 171, 172.
+const hotelRow = [...Array(20).keys()].map(i => i + 4).find(r => rooms.get(r, 1) === 'Hotel rooms');
+rooms.set(hotelRow, 5, '1, 2');
+const otherCells = JSON.stringify([...Array(9).keys()].map(i => rooms.get(4 + i, 5)).filter((x, i) => 4 + i !== hotelRow));
+const renum = ctx.doGet({ parameter: { key: 'test-key', action: 'data' } }).data;
+assert.strictEqual(rooms.get(hotelRow, 5), '171, 172');
+assert.deepStrictEqual(renum.categories.find(c => c.name === 'Hotel rooms').rooms, ['171', '172']);
+assert.strictEqual(JSON.stringify([...Array(9).keys()].map(i => rooms.get(4 + i, 5)).filter((x, i) => 4 + i !== hotelRow)), otherCells, 'other room lists unchanged');
+ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+assert.strictEqual(rooms.get(hotelRow, 5), '171, 172', 'runs once');
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

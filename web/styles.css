@@ -74,3 +74,20 @@ dialog h3 { margin-top: 0; }
 .sharer { display: flex; gap: 6px; }
 .sharer input { flex: 1; }
 ul.occupants { padding-left: 18px; margin: 0 0 10px; }
+
+/* Room board: darker, distinct colours. Each category has its own colour (heading chip and tile edge);
+   the tile fill shows the room's status; shared rooms are purple with the number of patients. */
+.cat-0 { --cat: #0b4f9c; } .cat-1 { --cat: #00695c; } .cat-2 { --cat: #6a1b9a; } .cat-3 { --cat: #ad1457; } .cat-4 { --cat: #c2410c; }
+.cat-5 { --cat: #4e342e; } .cat-6 { --cat: #8d6e00; } .cat-7 { --cat: #37474f; } .cat-8 { --cat: #1a237e; }
+.cat h3 { display: flex; align-items: center; gap: 8px; }
+.cat-chip { background: var(--cat); color: #fff; padding: 3px 10px; border-radius: 12px; font-size: 13px; }
+.cat .tile { border: 1px solid var(--cat); border-left: 6px solid var(--cat); }
+.tile.available, .legend i.available { background: #ffffff; color: var(--text); }
+.tile.occupied, .legend i.occupied { background: #1e3a5f; color: #fff; }
+.tile.admitted, .legend i.admitted { background: #0f6b45; color: #fff; }
+.tile.discharged, .legend i.discharged { background: #a8550a; color: #fff; }
+.tile.out, .legend i.out { background: #5b6470; color: #fff; }
+.tile.shared, .legend i.shared { background: #6b21a8; color: #fff; }
+.tile.available b { color: var(--cat); }
+.share-count { font-style: normal; font-size: 11px; font-weight: 700; background: #fff; color: #6b21a8; border-radius: 9px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
+.legend i { width: 14px; height: 14px; margin-right: -4px; border-color: #9aa5b1; }

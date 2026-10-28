@@ -225,7 +225,8 @@
       var free = Math.max(0, c.rooms.length - counts['occ:' + c.name] - counts['oos:' + c.name]);
       g.label = c.name + ' (' + free + ' of ' + c.rooms.length + ' free)';
       board.filter(function (r) { return r.category === c.name; }).forEach(function (r) {
-        var note = r.status === 'out' ? ' (out of service)' : r.patients.length ? ' (occupied: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' : '';
+        var note = r.status === 'out' ? ' (out of service)' : r.patients.length > 1 ? ' (' + r.patients.length + ' sharing: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' :
+          r.patients.length ? ' (occupied: ' + r.patients[0].name + ')' : '';
         var o = new Option(r.room + note, r.room);
         o.disabled = r.status === 'out';
         g.appendChild(o);
@@ -468,18 +469,26 @@
 
   /* ---------- room board ---------- */
 
+  var CAT_COLOURS = 9; // .cat-0 … .cat-8 in styles.css
   function renderBoard() {
     var date = $('#rooms-date').value || state.today;
     $('#rooms-date').value = date;
     var board = Calc.roomBoard(date, state.categories, state.patients, state.blocks);
-    $('#board').innerHTML = state.categories.map(function (c) {
+    var counts = Calc.day(date, state.categories, state.patients, state.blocks, state.plan); // the report's own numbers
+    $('#board').innerHTML = state.categories.map(function (c, ci) {
       var rooms = board.filter(function (r) { return r.category === c.name; });
-      var occ = rooms.filter(function (r) { return r.patients.length; }).length;
-      return '<div class="cat"><h3>' + esc(c.name) + ' <small>' + occ + ' of ' + c.rooms.length + ' occupied</small></h3><div class="tiles">' +
+      var occ = counts['occ:' + c.name];
+      var shared = rooms.filter(function (r) { return r.patients.length > 1; }).length;
+      // Each category has its own colour (heading and tile edge); the tile fill shows the room's status.
+      return '<div class="cat cat-' + (ci % CAT_COLOURS) + '"><h3><span class="cat-chip">' + esc(c.name) + '</span> <small>' + occ + ' of ' + c.rooms.length + ' occupied' +
+        (shared ? ', ' + shared + (shared === 1 ? ' room' : ' rooms') + ' shared' : '') + '</small></h3><div class="tiles">' +
         rooms.map(function (r) {
           var who = r.patients.map(function (p) { return esc(p.name); }).join('<br>') ||
             (r.status === 'discharged' ? r.leaving.map(function (p) { return esc(p.name); }).join('<br>') : r.status === 'out' ? esc(r.block.reason || 'Out of service') : '');
-          return '<button class="tile ' + r.status + '" data-room="' + esc(r.room) + '"><b>' + esc(r.room) + '</b><span>' + who + '</span></button>';
+          var sharing = r.patients.length > 1;
+          return '<button class="tile ' + r.status + (sharing ? ' shared' : '') + '" data-room="' + esc(r.room) + '"><b>' + esc(r.room) +
+            (sharing ? ' <em class="share-count" title="' + r.patients.length + ' patients sharing">' + r.patients.length + ' sharing</em>' : '') +
+            '</b><span>' + who + '</span></button>';
         }).join('') + '</div></div>';
     }).join('');
 
@@ -596,7 +605,7 @@
     var cards = [
       ['Total rooms', v.totalRooms], ['Occupied rooms', v.totalOccupied], ['Available rooms', v.totalAvailable],
       ['Out of service', v.totalOutOfService], ['Walk-in (PCE) admitted', v['src:' + Calc.SOURCES[0]]],
-      ['Walk-in visits', v.walkInVisits], ['Admitted', v.admitted], ['Discharged', v.discharged],
+      ['Admitted', v.admitted], ['Discharged', v.discharged],
       ['Patients in house', v.inHousePatients], ['In-house occupancy', Math.round(v.inHouseOccupancy * 100) + '%']
     ];
     $('#summary').innerHTML = cards.map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('');

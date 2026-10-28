@@ -111,6 +111,22 @@ function ensureTabs_() {
   var missing = [REPORT, ROOMS, PATIENTS, BLOCKS, PLAN].some(function (n) { return !ss.getSheetByName(n); });
   if (missing) setup();
   repairIds_();
+  renumberHotelRooms_();
+}
+
+// Hotel rooms 1 and 2 became 171 and 172 (28 Oct). Changes only that cell of Room Categories, and only while
+// it still reads exactly "1, 2". Entries saved with room 1 or 2 are counted in 171 / 172 (see Calc.canonRoom).
+function renumberHotelRooms_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
+  if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
+  var rows = sh.getRange(ROOMS_FIRST_ROW, 1, sh.getLastRow() - ROOMS_FIRST_ROW + 1, 5).getDisplayValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (/^hotel rooms$/i.test(String(rows[i][0]).trim()) && Calc.splitRooms(rows[i][4]).join(',') === '1,2') {
+      sh.getRange(ROOMS_FIRST_ROW + i, 5).setValue('171, 172');
+      refresh_();
+      return;
+    }
+  }
 }
 
 function doGet(e) {
@@ -275,7 +291,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 9;
+var BACKEND_VERSION = 10;
 
 function readAll_() {
   return {
@@ -446,7 +462,6 @@ function writeReport_(rep, cats, layout) {
     ['Available rooms', '=A3-B3-D3'],
     ['Out of service', lookup_('"totalOutOfService"', width, '', REPORT_SHOW_CELL)],
     ['Walk-in (PCE) admitted', lookup_('"src:' + Calc.SOURCES[0] + '"', width, '', REPORT_SHOW_CELL)],
-    ['Walk-in visits', lookup_('"walkInVisits"', width, '', REPORT_SHOW_CELL)],
     ['Admitted', lookup_('"admitted"', width, '', REPORT_SHOW_CELL)],
     ['Discharged', lookup_('"discharged"', width, '', REPORT_SHOW_CELL)],
     ['Patients in house', lookup_('"inHousePatients"', width, '', REPORT_SHOW_CELL)],
@@ -457,7 +472,7 @@ function writeReport_(rep, cats, layout) {
     .setFontWeight('bold').setWrap(true).setBackground(COLOURS.summary);
   sh.getRange(3, 1, 1, summary.length).setFormulas([summary.map(function (s) { return s[1]; })])
     .setFontSize(13).setFontWeight('bold').setHorizontalAlignment('center').setNumberFormat('0');
-  sh.getRange(3, 10).setNumberFormat('0%');
+  sh.getRange(3, summary.length).setNumberFormat('0%'); // In-house occupancy, the last summary item
   sh.getRange(4, 1).setValue('Category-wise occupied, available and admitted counts for this date are in the ' + ROOMS + ' tab.')
     .setFontColor('#666666');
 
