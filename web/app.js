@@ -239,6 +239,9 @@
   function resetForm(p) {
     editing = p || null;
     form.reset();
+    // form.reset() leaves hidden inputs as they were: clear them, or a new entry would carry the ID
+    // (and phone / planned admission) of the patient edited before it.
+    ['id', 'phone', 'visitDate', 'plannedAdmission'].forEach(function (k) { form[k].value = ''; });
     $('#sharers').innerHTML = '';
     $('#entry-title').textContent = p ? 'Edit ' + p.name : 'New entry';
     $('#entry-cancel').hidden = !p;

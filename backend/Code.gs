@@ -110,6 +110,7 @@ function ensureTabs_() {
   var ss = SpreadsheetApp.getActive();
   var missing = [REPORT, ROOMS, PATIENTS, BLOCKS, PLAN].some(function (n) { return !ss.getSheetByName(n); });
   if (missing) setup();
+  repairIds_();
 }
 
 function doGet(e) {
@@ -170,7 +171,7 @@ function savePatient_(d, input) {
   var cat = Calc.roomIndex(d.categories).byRoom[p.room];
   p.category = cat ? cat.name : '';
   p.extensions = p.extensions.join(', ');
-  return writeRow_(PATIENTS, PATIENT_FIELDS, p);
+  return writeRow_(PATIENTS, PATIENT_FIELDS, p, p.type === 'move'); // a room change arrives with its id
 }
 
 function saveBlock_(d, input) {
@@ -194,18 +195,22 @@ function savePlan_(input) {
 }
 
 // Adds or updates a record (matched on ID) and returns it.
-function writeRow_(name, fields, rec) {
+// newWithId: the record is new although it already has an id (a room change). Otherwise an id that
+// isn't found is an error, so an edit can never turn into a second copy of the entry.
+function writeRow_(name, fields, rec, newWithId) {
   var sh = sheet_(name);
   var now = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
   var row = rec.id ? findRow_(sh, rec.id) : 0;
-  if (!row) { rec.id = rec.id || Utilities.getUuid().slice(0, 8); rec.created = now; }
+  if (!row && rec.id && !newWithId) throw new Error('That entry was not found; it may have been deleted already. Reload the app and try again.');
+  if (!row) { rec.id = rec.id || newId_(); rec.created = now; }
   else rec.created = sh.getRange(row, fieldIndex_(fields, 'created') + 1).getDisplayValue();
   rec.updated = now;
   var values = [fields.map(function (f) {
     var v = rec[f[0]];
     if (v === null || v === undefined) return '';
     // Keep text as typed: phone numbers keep their + and leading 0, and nothing is read as a formula.
-    if (typeof v === 'string' && v && (f[0] === 'phone' || /^[=+\-@]/.test(v))) return "'" + v;
+    // IDs too: an id like 50807e10 would otherwise be read as a number (5.08E+12).
+    if (typeof v === 'string' && v && (f[0] === 'phone' || f[0] === 'id' || /^[=+\-@]/.test(v))) return "'" + v;
     return v;
   })];
   if (row) sh.getRange(row, 1, 1, fields.length).setValues(values);
@@ -220,11 +225,47 @@ function deleteRow_(name, id) {
   sh.deleteRow(row);
 }
 
+// IDs are compared exactly as readRows_ hands them to the app, so every entry the app shows can be found.
 function findRow_(sh, id) {
   if (!id || sh.getLastRow() < 2) return 0;
-  var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues();
-  for (var i = 0; i < ids.length; i++) if (ids[i][0] === String(id)) return i + 2;
+  var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) if (idText_(ids[i][0]) === String(id)) return i + 2;
   return 0;
+}
+function idText_(v) { return String(v === null || v === undefined ? '' : v).trim(); }
+// Starts with a letter, so the sheet can never read it as a number.
+function newId_() { return 'p' + Utilities.getUuid().replace(/-/g, '').slice(0, 7); }
+
+// Gives a fresh id to rows whose id the sheet turned into a number, or that share an id with an earlier
+// row (both made entries impossible to edit or delete). Only the ID cell changes; room changes that
+// pointed at a renamed id follow it. Nothing is deleted.
+function repairIds_() {
+  [PATIENTS, BLOCKS].forEach(function (name) {
+    var sh = SpreadsheetApp.getActive().getSheetByName(name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var range = sh.getRange(2, 1, sh.getLastRow() - 1, 1);
+    var ids = range.getValues();
+    var seen = {}, renamed = {}, changed = false;
+    ids.forEach(function (r, i) {
+      var text = idText_(r[0]);
+      var broken = typeof r[0] === 'number' || (text && seen[text]);
+      if (text) seen[text] = true;
+      if (!broken) return;
+      var fresh = newId_();
+      if (!renamed[text]) renamed[text] = fresh; // the first row with this id keeps its room changes
+      ids[i][0] = "'" + fresh;
+      changed = true;
+    });
+    if (!changed) return;
+    // Room change rows ('<patient id>/move/…') follow their patient's new id.
+    ids.forEach(function (r, i) {
+      var text = idText_(r[0]).replace(/^'/, '');
+      var k = text.indexOf(Calc.MOVE_SEP);
+      if (k > 0 && renamed[text.slice(0, k)]) ids[i][0] = "'" + renamed[text.slice(0, k)] + text.slice(k);
+      else if (typeof r[0] === 'string' && r[0].charAt(0) !== "'") ids[i][0] = "'" + r[0];
+    });
+    range.setValues(ids);
+  });
 }
 function fieldIndex_(fields, key) {
   for (var i = 0; i < fields.length; i++) if (fields[i][0] === key) return i;
@@ -234,7 +275,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 8;
+var BACKEND_VERSION = 9;
 
 function readAll_() {
   return {

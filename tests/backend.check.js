@@ -216,5 +216,27 @@ assert.strictEqual(val('2026-10-12', 'occ:Executive (J block)'), occJ - 1);
 assert.strictEqual(val('2026-10-12', 'occ:Executive (S block)'), occS + 1);
 assert.strictEqual(res.data.patients.find(p => p.type === 'move').category, 'Executive (S block)');
 
+// IDs the sheet turned into a number, and an ID shared by several rows (as in the live sheet on 28 Oct):
+// the next request gives them fresh ids, and each can then be deleted on its own.
+const pats = ss.getSheetByName('Data: patients');
+const addRow = (id, name) => { const r = pats.getLastRow() + 1; pats.set(r, 1, id); pats.set(r, 2, name); pats.set(r, 4, 'Corporate'); pats.set(r, 5, 'admission'); pats.set(r, 8, '2026-10-19'); pats.set(r, 9, 'J 9'); };
+addRow(4.44e65, 'Dup A'); addRow(4.44e65, 'Dup B'); addRow(5080700000000, 'Numeric');
+let all = ctx.doGet({ parameter: { key: 'test-key', action: 'data' } }).data.patients;
+const ids = ['Dup A', 'Dup B', 'Numeric'].map(n => all.find(p => p.name === n).id);
+assert.strictEqual(new Set(ids).size, 3, 'each row has its own id');
+ids.forEach(id => assert.match(id, /^p[0-9a-z]{7}$/));
+const before = all.length;
+res = post('deletePatient', { id: ids[1] });
+assert.ok(res.ok, res.error);
+assert.strictEqual(res.data.patients.length, before - 1);
+assert.ok(res.data.patients.some(p => p.name === 'Dup A') && !res.data.patients.some(p => p.name === 'Dup B'));
+// Editing an entry that no longer exists is refused instead of adding a copy.
+const gone = post('savePatient', { id: ids[1], type: 'admission', name: 'Dup B', source: 'Corporate', admission: '2026-10-19', room: 'J 9', share: true });
+assert.ok(!gone.ok && /not found/.test(gone.error));
+assert.strictEqual(post('savePlan', { date: '2026-10-22', plan: 61 }).data.patients.length, before - 1);
+// New ids are stored as text, never as numbers.
+res = post('savePatient', { type: 'admission', name: 'New one', source: 'Corporate', admission: '2026-10-21', room: 'J 10' });
+assert.match(res.data.patients.find(p => p.name === 'New one').id, /^p[0-9a-z]{7}$/);
+
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');
