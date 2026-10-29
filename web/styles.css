@@ -91,3 +91,5 @@ ul.occupants { padding-left: 18px; margin: 0 0 10px; }
 .tile.available b { color: var(--cat); }
 .share-count { font-style: normal; font-size: 11px; font-weight: 700; background: #fff; color: #6b21a8; border-radius: 9px; padding: 0 6px; margin-left: 4px; white-space: nowrap; }
 .legend i { width: 14px; height: 14px; margin-right: -4px; border-color: #9aa5b1; }
+.planned-toolbar { margin-top: 18px; }
+.cards .planned-row { grid-column: 1 / -1; margin: 0; }

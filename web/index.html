@@ -16,6 +16,7 @@
     <nav id="tabs">
       <button data-tab="entry" class="active">New entry</button>
       <button data-tab="datewise">Date-wise</button>
+      <button data-tab="planned">Planned admissions</button>
       <button data-tab="patients">Patients</button>
       <button data-tab="rooms">Rooms</button>
       <button data-tab="report">Report</button>
@@ -74,6 +75,38 @@
       <div class="table-wrap"><table id="dw-adm" class="list"></table></div>
       <h3>Discharges</h3>
       <div class="table-wrap"><table id="dw-dis" class="list"></table></div>
+    </section>
+
+    <!-- Planned admissions (bookings): counted in the IP Report's "Planned admissions" columns -->
+    <section id="tab-planned" class="tab" hidden>
+      <form id="planned" class="card" autocomplete="off">
+        <h2 id="planned-title">New planned admission</h2>
+        <input type="hidden" name="pid">
+        <div class="grid">
+          <label>Date <input type="date" name="entryDate" required></label>
+          <label>Patient name <input name="pname" required></label>
+          <label>Phone <input name="pphone" inputmode="tel"></label>
+          <label>Source <select name="psource" required></select></label>
+          <label>Planned admission date <input type="date" name="pdate" required></label>
+        </div>
+        <label>Notes <textarea name="pnotes" rows="2"></textarea></label>
+        <p class="hint">Counted in the IP Report under <b>Planned admissions</b> (walk-in, virtual, or corporate / clinic / other, by source)
+          on the row of the day before the planned admission date, the report's "tomorrow" columns.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Save planned admission</button>
+          <button type="button" id="planned-cancel" hidden>Cancel</button>
+        </div>
+      </form>
+
+      <div class="toolbar planned-toolbar">
+        <label>Planned admissions for <input type="date" id="pl-date"></label>
+        <button type="button" id="pl-prev">&lsaquo; Previous day</button>
+        <button type="button" id="pl-next">Next day &rsaquo;</button>
+      </div>
+      <div id="pl-summary" class="cards"></div>
+      <div class="table-wrap"><table id="pl-day" class="list"></table></div>
+      <h3>All upcoming planned admissions</h3>
+      <div class="table-wrap"><table id="pl-all" class="list"></table></div>
     </section>
 
     <!-- Patients -->

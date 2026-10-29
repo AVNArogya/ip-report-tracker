@@ -159,7 +159,7 @@
   }
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
 
-  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderDatewise(); }
+  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderDatewise(); renderPlanned(); }
 
   /* ---------- entry form ---------- */
 
@@ -425,7 +425,10 @@
     var p = state.patients.filter(function (x) { return x.id === id; })[0];
     if (!p) return;
     ({ admit: admitFrom, discharge: discharge, extend: extend, delete: remove, roomChange: roomChange,
-      edit: function (x) { resetForm(x); showTab('entry'); } })[btn.dataset.a](p);
+      edit: function (x) {
+        if (x.type === 'booking') { editPlanned(x); return; } // planned admissions are edited on their own tab
+        resetForm(x); showTab('entry');
+      } })[btn.dataset.a](p);
   });
 
   /* ---------- room change ---------- */
@@ -555,6 +558,86 @@
     form.name.focus();
   }
 
+  /* ---------- planned admissions ---------- */
+
+  // A planned admission is saved as a booking (type 'booking'): the IP Report already counts bookings in its
+  // "Planned admissions" columns, on the row of the day before the planned date. When the patient arrives,
+  // "Admit" turns the booking into the admission (keeping the planned date, for As planned / Before plan).
+  var pform = $('#planned');
+  var pf = function (name) { return pform.elements.namedItem(name); };
+  var plannedEditing = null;
+  Calc.SOURCES.forEach(function (s) { pf('psource').add(new Option(s, s)); });
+
+  function plannedColumn(p) {
+    return p.source === Calc.SOURCES[0] ? 'Walk-in' : p.source === Calc.SOURCES[1] ? 'Virtual' : 'Corporate / clinic / other';
+  }
+  function resetPlanned(p) {
+    plannedEditing = p || null;
+    pform.reset();
+    pf('pid').value = p ? p.id : ''; // hidden: set explicitly, form.reset() leaves it
+    pf('entryDate').value = p ? (p.visitDate || state.today) : state.today;
+    pf('pname').value = p ? p.name : '';
+    pf('pphone').value = p ? (p.phone || '') : '';
+    pf('psource').value = p ? p.source : Calc.SOURCES[0];
+    pf('pdate').value = p ? (p.plannedAdmission || '') : '';
+    pf('pnotes').value = p ? (p.notes || '') : '';
+    $('#planned-title').textContent = p ? 'Edit planned admission: ' + p.name : 'New planned admission';
+    $('#planned-cancel').hidden = !p;
+  }
+  function editPlanned(p) { resetPlanned(p); showTab('planned'); pf('pname').focus(); }
+  $('#planned-cancel').addEventListener('click', function () { resetPlanned(); });
+
+  pform.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var rec = Object.assign({}, plannedEditing || {}, {
+      id: pf('pid').value, type: 'booking', name: pf('pname').value, phone: pf('pphone').value, source: pf('psource').value,
+      visitDate: pf('entryDate').value, plannedAdmission: pf('pdate').value, notes: pf('pnotes').value
+    });
+    var date = rec.plannedAdmission;
+    save('savePatient', rec, (plannedEditing ? 'Updated ' : 'Saved ') + rec.name + ': planned admission ' + short(date) +
+      ', counted under Planned admissions (' + plannedColumn(rec) + ') on the ' + short(Calc.addDays(date, -1)) + ' row.').then(function () {
+      resetPlanned();
+      $('#pl-date').value = date;
+      renderPlanned();
+    }, function () {});
+  });
+
+  function renderPlanned() {
+    if (!$('#pl-date').value) $('#pl-date').value = Calc.addDays(state.today, 1);
+    var date = $('#pl-date').value;
+    var bookings = state.patients.filter(function (p) { return p.type === 'booking' && p.plannedAdmission; });
+    var day = bookings.filter(function (p) { return p.plannedAdmission === date; }).sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
+    var n = function (col) { return day.filter(function (p) { return plannedColumn(p) === col; }).length; };
+    $('#pl-summary').innerHTML = [['Planned for', fmtDate(date)], ['Walk-in', n('Walk-in')], ['Virtual', n('Virtual')],
+      ['Corporate / clinic / other', n('Corporate / clinic / other')], ['Total', day.length]]
+      .map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('') +
+      '<p class="hint planned-row">These are counted in the IP Report row for <b>' + fmtDate(Calc.addDays(date, -1)) + '</b>.</p>';
+    var row = function (p, i) {
+      return '<tr data-id="' + esc(p.id) + '"><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.phone) + '</td><td>' + esc(p.source) +
+        '</td><td>' + short(p.plannedAdmission) + '</td><td>' + short(p.visitDate) + '</td><td>' + esc(p.notes) + '</td><td class="acts">' +
+        '<button data-a="admit">Admit</button><button data-a="edit">Edit</button><button data-a="delete" class="danger">Delete</button></td></tr>';
+    };
+    var head = '<thead><tr><th>#</th><th>Patient</th><th>Phone</th><th>Source</th><th>Planned admission</th><th>Entered on</th><th>Notes</th><th></th></tr></thead>';
+    $('#pl-day').innerHTML = head + '<tbody>' + (day.map(row).join('') || '<tr><td colspan="8" class="empty">No planned admissions for this date.</td></tr>') + '</tbody>';
+    var upcoming = bookings.filter(function (p) { return p.plannedAdmission >= state.today; })
+      .sort(function (a, b) { return String(a.plannedAdmission).localeCompare(String(b.plannedAdmission)) || String(a.name).localeCompare(String(b.name)); });
+    $('#pl-all').innerHTML = head + '<tbody>' + (upcoming.map(row).join('') || '<tr><td colspan="8" class="empty">No upcoming planned admissions.</td></tr>') + '</tbody>';
+  }
+  $('#pl-date').addEventListener('change', renderPlanned);
+  $('#pl-prev').addEventListener('click', function () { $('#pl-date').value = Calc.addDays($('#pl-date').value, -1); renderPlanned(); });
+  $('#pl-next').addEventListener('click', function () { $('#pl-date').value = Calc.addDays($('#pl-date').value, 1); renderPlanned(); });
+  ['#pl-day', '#pl-all'].forEach(function (sel) {
+    $(sel).addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-a]');
+      if (!btn) return;
+      var p = state.patients.filter(function (x) { return x.id === btn.closest('tr').dataset.id; })[0];
+      if (!p) return;
+      if (btn.dataset.a === 'admit') admitFrom(p);
+      else if (btn.dataset.a === 'edit') editPlanned(p);
+      else remove(p);
+    });
+  });
+
   /* ---------- date-wise admissions and discharges ---------- */
 
   function renderDatewise() {
@@ -654,7 +737,8 @@
 
   $('#mode').textContent = DEMO ? 'Practice mode: saved in this browser only' : '';
   resetForm();
+  resetPlanned();
   renderAll();
   status('Loading…');
-  load().then(function (d) { apply(d); resetForm(); if (DEMO || d.version >= BACKEND_VERSION) status(''); }).catch(function (e) { status('Could not load the sheet: ' + e.message, 'error'); });
+  load().then(function (d) { apply(d); resetForm(); if (!plannedEditing) resetPlanned(); if (DEMO || d.version >= BACKEND_VERSION) status(''); }).catch(function (e) { status('Could not load the sheet: ' + e.message, 'error'); });
 })();
