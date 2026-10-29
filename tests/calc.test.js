@@ -90,7 +90,7 @@ test('sharing, extensions, planned discharges and bookings', () => {
   assert.strictEqual(v['occ:Classic villa'], 5);
   assert.strictEqual(v.inHousePatients, 52);
   assert.strictEqual(v.totalOccupied, 49);
-  assert.strictEqual(v.extended, 1);
+  assert.strictEqual(v.extended, 0); // nobody discharged that day
   assert.strictEqual(v.dischargesConfirmed, 2);
   // Bookings planned for 4 Oct count on 4 Oct only, not on the days before.
   assert.strictEqual(v.plannedVirtual + v.plannedOther, 0);
@@ -98,10 +98,10 @@ test('sharing, extensions, planned discharges and bookings', () => {
   assert.strictEqual(v4.plannedVirtual, 1);
   assert.strictEqual(v4.plannedOther, 1);
   assert.strictEqual(v.walkInVisits, 2); // the visit and the walk-in admitted that day
-  assert.strictEqual(v.beforePlan, 1);
+  assert.strictEqual(v.beforePlan, 0); // As planned / Before plan are about discharges
   assert.strictEqual(v.asPlanned, 0);
   const onDate = Calc.day('2026-10-06', cats, [admit('7', 'J 4', '2026-10-06', { plannedAdmission: '2026-10-06' })], [], {});
-  assert.strictEqual(onDate.asPlanned, 1);
+  assert.strictEqual(onDate.asPlanned, 0); // an admission, not a discharge
   assert.strictEqual(onDate.beforePlan, 0);
   assert.strictEqual(v.plan, 55.5);
 });
@@ -320,8 +320,29 @@ test('a planned admission counts only on its planned date, and stays counted aft
   const v30 = Calc.day('2026-10-30', cats, [admitted], [], {});
   assert.strictEqual(v30.plannedWalkIn, 1);
   assert.strictEqual(v30.admitted, 1);
-  assert.strictEqual(v30.asPlanned, 1);
+  assert.strictEqual(v30.asPlanned, 0); // not a discharge
   // Admissions without a planned date and room changes are not planned admissions.
   const plain = Calc.day('2026-10-31', cats, [admit('a', 'J 7', '2026-10-31'), { id: 'a/move/1', type: 'move', room: 'J 8', visitDate: '2026-10-31' }], [], {});
   assert.strictEqual(plain.plannedWalkIn + plain.plannedVirtual + plain.plannedOther, 0);
+});
+
+test('discharges by plan: As planned, Before plan, Stays extended today (on the actual discharge date)', () => {
+  const pts = [
+    admit('a', 'J 1', '2026-10-20', { plannedDischarge: '2026-10-29', discharge: '2026-10-29' }),  // on plan
+    admit('b', 'J 2', '2026-10-20', { plannedDischarge: '2026-11-02', discharge: '2026-10-29' }),  // early
+    admit('c', 'J 3', '2026-10-20', { plannedDischarge: '2026-10-27', discharge: '2026-10-29', extensions: ['2026-10-27'] }), // late
+    admit('d', 'J 4', '2026-10-20', { discharge: '2026-10-29' }),                                  // no planned date
+    admit('e', 'J 5', '2026-10-20', { plannedDischarge: '2026-10-29' }),                           // still in on its planned date
+    { id: 'f', type: 'carried', name: 'F', room: 'J 6', discharge: '2026-10-29', roomFreed: 'Yes' } // from before 1 Oct
+  ];
+  const v = Calc.day('2026-10-29', cats, pts, [], {});
+  assert.strictEqual(v.discharged, 5);
+  assert.strictEqual(v.asPlanned, 1);
+  assert.strictEqual(v.beforePlan, 1);
+  assert.strictEqual(v.extended, 1);
+  // The late discharge counts on 29 Oct (actual date), not on 27 Oct (planned date).
+  const v27 = Calc.day('2026-10-27', cats, pts, [], {});
+  assert.strictEqual(v27.extended + v27.asPlanned + v27.beforePlan, 0);
+  // Admissions are not counted in these columns.
+  assert.strictEqual(Calc.day('2026-10-20', cats, pts, [], {}).asPlanned, 0);
 });

@@ -306,12 +306,15 @@ var Calc = (function () {
         if (v['src:' + p.source] !== undefined) v['src:' + p.source]++;
         else v['src:' + SOURCES[4]]++;
         if (cat) v['adm:' + cat.name]++;
-        // Bookings admitted on their planned date, or earlier than planned.
-        if (p.plannedAdmission === d) v.asPlanned++;
-        if (p.plannedAdmission && p.plannedAdmission > d) v.beforePlan++;
       }
-      if (counted && p.discharge === d) v.discharged++;
-      if (counted && (p.extensions || []).indexOf(d) >= 0) v.extended++;
+      // Discharged today, compared with the planned discharge date (as in the old report's "Discharged today"):
+      // on the planned date = As planned; earlier = Before plan; later = Stays extended today.
+      if (counted && p.discharge === d) {
+        v.discharged++;
+        if (p.plannedDischarge === d) v.asPlanned++;
+        else if (p.plannedDischarge && p.plannedDischarge > d) v.beforePlan++;
+        else if (p.plannedDischarge && p.plannedDischarge < d) v.extended++;
+      }
       if (inHouseOn(p, d)) {
         v.inHousePatients++;
         var tonightRoom = canonRoom(roomOn(p, d, moves), idx); // after any room change
@@ -842,7 +845,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 12;
+var BACKEND_VERSION = 13;
 
 function readAll_() {
   return {
