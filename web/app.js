@@ -86,7 +86,7 @@
     } else if (action === 'deletePatient') {
       d.patients = d.patients.filter(function (p) { return p.id !== rec.id; });
     } else if (action === 'saveBlock') {
-      var rb = Calc.checkBlock(rec, d.categories);
+      var rb = Calc.checkBlock(rec, d.categories, d.patients, d.blocks.filter(function (b) { return b.id !== rec.id; }));
       if (rb.errors.length) throw new Error(rb.errors.join(' '));
       saved = rb.block;
       if (!saved.id) { saved.id = id(); d.blocks.push(saved); }
@@ -484,7 +484,9 @@
       var shared = rooms.filter(function (r) { return r.patients.length > 1; }).length;
       // Each category has its own colour (heading and tile edge); the tile fill shows the room's status.
       return '<div class="cat cat-' + (ci % CAT_COLOURS) + '"><h3><span class="cat-chip">' + esc(c.name) + '</span> <small>' + occ + ' of ' + c.rooms.length + ' occupied' +
-        (shared ? ', ' + shared + (shared === 1 ? ' room' : ' rooms') + ' shared' : '') + '</small></h3><div class="tiles">' +
+        (shared ? ', ' + shared + (shared === 1 ? ' room' : ' rooms') + ' shared' : '') +
+        (counts['oos:' + c.name] ? ', ' + counts['oos:' + c.name] + ' out of service' : '') +
+        ', ' + Math.max(0, c.rooms.length - occ - counts['oos:' + c.name]) + ' available</small></h3><div class="tiles">' +
         rooms.map(function (r) {
           var who = r.patients.map(function (p) { return esc(p.name); }).join('<br>') ||
             (r.status === 'discharged' ? r.leaving.map(function (p) { return esc(p.name); }).join('<br>') : r.status === 'out' ? esc(r.block.reason || 'Out of service') : '');
@@ -495,14 +497,62 @@
         }).join('') + '</div></div>';
     }).join('');
 
+    // Rooms out of service on the chosen date: total and by block (the IP Report's J / S / SW block columns).
+    var blockNames = Calc.blocksOf(state.categories);
+    var outside = state.categories.filter(function (c) { return !Calc.isInHouse(c); })
+      .reduce(function (a, c) { return a + counts['oos:' + c.name]; }, 0);
+    $('#oos-summary').innerHTML = [['Out of service on ' + short(date), counts.totalOutOfService]]
+      .concat(blockNames.map(function (b) { return [b + ' block', counts['oosBlock:' + b]]; }))
+      .concat(outside ? [['Apartment / hotel', outside]] : [])
+      .concat([['Rooms available', counts.totalAvailable]])
+      .map(function (c) { return '<div class="stat"><span>' + esc(c[0]) + '</span><b>' + c[1] + '</b></div>'; }).join('');
+
     var blocks = state.blocks.slice().sort(function (a, b) { return String(b.from).localeCompare(String(a.from)); });
-    $('#block-table').innerHTML = '<thead><tr><th>Room</th><th>Category</th><th>From</th><th>Until</th><th>Reason</th><th></th></tr></thead><tbody>' +
+    var catOfRoom = function (room) { return Calc.roomIndex(state.categories).byRoom[room]; };
+    $('#block-table').innerHTML = '<thead><tr><th>Room</th><th>Category</th><th>Block</th><th>From</th><th>Until</th><th>Status on ' + short(date) + '</th><th>Reason</th><th></th></tr></thead><tbody>' +
       (blocks.map(function (b) {
-        return '<tr data-id="' + esc(b.id) + '"><td>' + esc(b.room) + '</td><td>' + esc(catOf(b.room)) + '</td><td>' + short(b.from) + '</td><td>' +
-          (b.until ? short(b.until) : 'until put back') + '</td><td>' + esc(b.reason) + '</td><td class="acts">' +
-          (!b.until ? '<button data-a="back">Put back in service</button>' : '') + '<button data-a="del" class="danger">Delete</button></td></tr>';
-      }).join('') || '<tr><td colspan="6" class="empty">No rooms out of service.</td></tr>') + '</tbody>';
+        var c = catOfRoom(b.room);
+        var on = b.from <= date && (!b.until || b.until >= date);
+        var st = on ? 'Out of service' : b.from > date ? 'Starts ' + short(b.from) : 'Back in service';
+        var active = b.from <= state.today && (!b.until || b.until >= state.today);
+        return '<tr data-id="' + esc(b.id) + '"><td>' + esc(b.room) + '</td><td>' + esc(catOf(b.room)) + '</td><td>' + esc(c && c.block ? c.block : '-') + '</td><td>' + short(b.from) + '</td><td>' +
+          (b.until ? short(b.until) : 'until put back') + '</td><td>' + st + '</td><td>' + esc(b.reason) + '</td><td class="acts">' +
+          (active ? '<button data-a="back">Put back in service</button>' : '') + '<button data-a="del" class="danger">Delete</button></td></tr>';
+      }).join('') || '<tr><td colspan="8" class="empty">No rooms out of service.</td></tr>') + '</tbody>';
+    renderOosRooms();
   }
+
+  /* ---------- out of service form ---------- */
+
+  var oform = $('#oos-form');
+  var of = function (name) { return oform.elements.namedItem(name); };
+  // Rooms of the chosen category, with what each is doing on the start date.
+  function renderOosRooms() {
+    var cats = state.categories;
+    if (!of('oosCat').options.length || of('oosCat').options.length !== cats.length) {
+      var keep = of('oosCat').value;
+      of('oosCat').innerHTML = cats.map(function (c) { return '<option>' + esc(c.name) + '</option>'; }).join('');
+      if (keep) of('oosCat').value = keep;
+    }
+    if (!of('oosFrom').value) of('oosFrom').value = state.today;
+    var from = of('oosFrom').value || state.today;
+    var current = of('oosRoom').value;
+    var board = Calc.roomBoard(from, cats, state.patients, state.blocks).filter(function (r) { return r.category === of('oosCat').value; });
+    of('oosRoom').innerHTML = '<option value="">Choose a room</option>' + board.map(function (r) {
+      var note = r.patients.length ? ' (occupied: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' : r.status === 'out' ? ' (already out of service)' : '';
+      return '<option value="' + esc(r.room) + '">' + esc(r.room + note) + '</option>';
+    }).join('');
+    of('oosRoom').value = current;
+  }
+  ['oosCat', 'oosFrom'].forEach(function (n) { of(n).addEventListener('change', renderOosRooms); });
+  oform.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var rec = { room: of('oosRoom').value, from: of('oosFrom').value, until: of('oosUntil').value, reason: of('oosReason').value };
+    save('saveBlock', rec, 'Room ' + rec.room + ' is out of service from ' + short(rec.from) + (rec.until ? ' to ' + short(rec.until) : ' until put back in service') + '.').then(function () {
+      of('oosRoom').value = ''; of('oosUntil').value = ''; of('oosReason').value = '';
+      $('#rooms-date').value = rec.from; renderBoard();
+    }, function () {});
+  });
   $('#rooms-date').addEventListener('change', renderBoard);
   $('#board').addEventListener('click', function (e) {
     var tile = e.target.closest('.tile');
@@ -543,7 +593,7 @@
     if (!btn) return;
     var b = state.blocks.filter(function (x) { return x.id === btn.closest('tr').dataset.id; })[0];
     if (btn.dataset.a === 'del') { if (confirm('Delete this out-of-service entry?')) save('deleteBlock', { id: b.id }, 'Deleted.'); }
-    else ask('Put room ' + b.room + ' back in service', '<label>Last day out of service <input type="date" name="until" required value="' + Calc.addDays(state.today, -1) + '"></label>',
+    else ask('Put room ' + b.room + ' back in service', '<label>Last day out of service <input type="date" name="until" required value="' + (Calc.addDays(state.today, -1) < b.from ? b.from : Calc.addDays(state.today, -1)) + '"></label>',
       function (v) { save('saveBlock', Object.assign({}, b, { until: v.until }), 'Room ' + b.room + ' back in service.'); });
   });
 

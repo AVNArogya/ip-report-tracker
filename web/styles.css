@@ -93,3 +93,5 @@ ul.occupants { padding-left: 18px; margin: 0 0 10px; }
 .legend i { width: 14px; height: 14px; margin-right: -4px; border-color: #9aa5b1; }
 .planned-toolbar { margin-top: 18px; }
 .cards .planned-row { grid-column: 1 / -1; margin: 0; }
+.oos-form { margin: 18px 0 6px; }
+#oos-summary { margin: 10px 0; }

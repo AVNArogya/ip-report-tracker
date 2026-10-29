@@ -131,7 +131,23 @@
         <span class="legend"><i class="available"></i>Available <i class="admitted"></i>Admitted today <i class="occupied"></i>Occupied
           <i class="discharged"></i>Discharged today <i class="shared"></i>Shared (number of patients shown) <i class="out"></i>Out of service</span>
       </div>
+      <div id="oos-summary" class="cards"></div>
       <div id="board"></div>
+
+      <form id="oos-form" class="card oos-form" autocomplete="off">
+        <h2>Mark a room out of service</h2>
+        <div class="grid">
+          <label>Room category <select name="oosCat"></select></label>
+          <label>Room <select name="oosRoom" required></select></label>
+          <label>Out of service start date <input type="date" name="oosFrom" required></label>
+          <label>Out of service end date <input type="date" name="oosUntil"></label>
+          <label>Reason <input name="oosReason" placeholder="e.g. maintenance, held"></label>
+        </div>
+        <p class="hint">The room can't be given to a patient from the start date to the end date (both included), and is counted out of service in its
+          category and block. Leave the end date blank to keep it out until you put it back in service below.</p>
+        <div class="actions"><button type="submit" class="primary">Mark out of service</button></div>
+      </form>
+
       <h3>Rooms out of service</h3>
       <div class="table-wrap"><table id="block-table" class="list"></table></div>
     </section>

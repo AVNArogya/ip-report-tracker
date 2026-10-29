@@ -112,10 +112,27 @@ function ensureTabs_() {
   if (missing) setup();
   repairIds_();
   renumberHotelRooms_();
+  deluxeToJBlock_();
 }
 
 // Hotel rooms 1 and 2 became 171 and 172 (28 Oct). Changes only that cell of Room Categories, and only while
 // it still reads exactly "1, 2". Entries saved with room 1 or 2 are counted in 171 / 172 (see Calc.canonRoom).
+// Deluxe belongs to J block (29 Oct). Sets that one Block cell once; a later change made in the sheet is kept.
+function deluxeToJBlock_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('DELUXE_J_BLOCK_DONE')) return;
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
+  if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
+  var rows = sh.getRange(ROOMS_FIRST_ROW, 1, sh.getLastRow() - ROOMS_FIRST_ROW + 1, 3).getDisplayValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (/^deluxe$/i.test(String(rows[i][0]).trim())) {
+      if (String(rows[i][2]).trim() !== 'J') { sh.getRange(ROOMS_FIRST_ROW + i, 3).setValue('J'); refresh_(); }
+      break;
+    }
+  }
+  props.setProperty('DELUXE_J_BLOCK_DONE', 'yes');
+}
+
 function renumberHotelRooms_() {
   var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
   if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
@@ -191,7 +208,7 @@ function savePatient_(d, input) {
 }
 
 function saveBlock_(d, input) {
-  var res = Calc.checkBlock(input, d.categories);
+  var res = Calc.checkBlock(input, d.categories, d.patients, d.blocks.filter(function (b) { return b.id !== input.id; }));
   if (res.errors.length) throw new Error(res.errors.join(' '));
   var b = res.block;
   b.category = Calc.roomIndex(d.categories).byRoom[b.room].name;
@@ -291,7 +308,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 13;
+var BACKEND_VERSION = 14;
 
 function readAll_() {
   return {

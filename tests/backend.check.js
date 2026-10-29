@@ -87,11 +87,12 @@ class Spreadsheet {
 }
 
 const ss = new Spreadsheet();
+const scriptProps = { APP_KEY: 'test-key' };
 const validation = { requireValueInList() { return this; }, requireDate() { return this; }, setAllowInvalid() { return this; }, build() { return {}; } };
 let uuid = 0;
 const ctx = {
   SpreadsheetApp: { getActive: () => ss, newDataValidation: () => validation, getUi: () => ({}) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'test-key' }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => scriptProps[k] || null, setProperty: (k, v) => { scriptProps[k] = v; } }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType: () => JSON.parse(s) }) },
   Utilities: {
@@ -235,7 +236,8 @@ const gone = post('savePatient', { id: ids[1], type: 'admission', name: 'Dup B',
 assert.ok(!gone.ok && /not found/.test(gone.error));
 assert.strictEqual(post('savePlan', { date: '2026-10-22', plan: 61 }).data.patients.length, before - 1);
 // New ids are stored as text, never as numbers.
-res = post('savePatient', { type: 'admission', name: 'New one', source: 'Corporate', admission: '2026-10-21', room: 'J 10' });
+res = post('savePatient', { type: 'admission', name: 'New one', source: 'Corporate', admission: '2026-10-21', room: '503' }); // Economy is full that day in this test data
+assert.ok(res.ok, res.error);
 assert.match(res.data.patients.find(p => p.name === 'New one').id, /^p[0-9a-z]{7}$/);
 
 // Hotel rooms still listed as "1, 2" (as in the live sheet): the next request renumbers that one cell to 171, 172.
@@ -248,6 +250,27 @@ assert.deepStrictEqual(renum.categories.find(c => c.name === 'Hotel rooms').room
 assert.strictEqual(JSON.stringify([...Array(9).keys()].map(i => rooms.get(4 + i, 5)).filter((x, i) => 4 + i !== hotelRow)), otherCells, 'other room lists unchanged');
 ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
 assert.strictEqual(rooms.get(hotelRow, 5), '171, 172', 'runs once');
+
+// Deluxe moves to J block once; a later change made in the sheet is kept.
+const deluxeRow = [...Array(20).keys()].map(i => i + 4).find(r => rooms.get(r, 1) === 'Deluxe');
+assert.strictEqual(rooms.get(deluxeRow, 3), 'J', 'Deluxe in J block after the first request');
+rooms.set(deluxeRow, 3, 'S'); ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+assert.strictEqual(rooms.get(deluxeRow, 3), 'S', 'not forced back');
+rooms.set(deluxeRow, 3, 'J'); ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+
+// Out of service: refused while a patient is in the room; counted by block; the room can't be used meanwhile.
+const inRoom = post('savePatient', { type: 'admission', name: 'Occupant', source: 'Corporate', admission: '2026-10-23', room: '112', plannedDischarge: '2026-10-25', discharge: '2026-10-25' });
+assert.ok(inRoom.ok, inRoom.error);
+let oos = post('saveBlock', { room: '112', from: '2026-10-24', until: '2026-10-26', reason: 'Repairs' });
+assert.ok(!oos.ok && /Occupant/.test(oos.error), 'occupied room refused');
+oos = post('saveBlock', { room: '112', from: '2026-10-25', until: '2026-10-26', reason: 'Repairs' });
+assert.ok(oos.ok, oos.error); // free from the discharge date
+assert.strictEqual(val('2026-10-25', 'oosBlock:J'), 1, 'Deluxe counts in J block');
+const dayAt = dd => Calc.day(dd, oos.data.categories, oos.data.patients, oos.data.blocks, {});
+assert.strictEqual(dayAt('2026-10-26')['oosBlock:J'], 1);
+assert.strictEqual(dayAt('2026-10-27')['oosBlock:J'], 0, 'back after the end date');
+const intoOos = post('savePatient', { type: 'admission', name: 'Blocked', source: 'Corporate', admission: '2026-10-26', room: '112' });
+assert.ok(!intoOos.ok && /out of service/.test(intoOos.error));
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

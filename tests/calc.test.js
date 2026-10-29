@@ -346,3 +346,20 @@ test('discharges by plan: As planned, Before plan, Stays extended today (on the 
   // Admissions are not counted in these columns.
   assert.strictEqual(Calc.day('2026-10-20', cats, pts, [], {}).asPlanned, 0);
 });
+
+test('a category with no room left refuses new admissions and room changes, but allows sharing', () => {
+  // Royal villa has 1 room, held from 30 Sep until that patient leaves.
+  const chk = (extra, list) => Calc.checkPatient(Object.assign({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-05', room: '701' }, extra), list || [], cats, []).errors.join(' ');
+  assert.match(chk({}), /No Royal villa room is available/);
+  const left = [{ id: 'c', type: 'carried', name: 'Old', room: '701', discharge: '2026-10-04', roomFreed: 'Yes' }];
+  assert.strictEqual(chk({}, left), '');
+  // Out of service on that date: refused even though it is free.
+  assert.match(Calc.checkPatient({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-05', room: '701' }, left, cats,
+    [{ room: '701', from: '2026-10-05', until: '2026-10-06' }]).errors.join(' '), /out of service/);
+  // Sharing an occupied room needs no free room.
+  const inIt = left.concat(admit('x', '701', '2026-10-05'));
+  assert.strictEqual(chk({ admission: '2026-10-06', share: true }, inIt), '');
+  // Out of service can't start while a patient is in the room.
+  assert.match(Calc.checkBlock({ room: '701', from: '2026-10-06', until: '2026-10-08' }, cats, inIt).errors.join(' '), /has N|has/);
+  assert.deepStrictEqual(Calc.checkBlock({ room: '701', from: '2026-10-06' }, cats, left).errors, []);
+});

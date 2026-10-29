@@ -45,7 +45,7 @@ var Calc = (function () {
     ['Economy', 'Economy', 'J', 'In-house', 'J 1, J 2, J 3, J 4, J 5, J 6, J 7, J 8, J 9, J 10, J 11, J 12'],
     ['Executive (J block)', 'Executive JF', 'J', 'In-house', 'JF1, JF2, JF3, JF4, JF5, JF6, JF7'],
     ['Executive (S block)', 'Executive S', 'S', 'In-house', '101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 121, 122, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161'],
-    ['Deluxe', 'Deluxe', 'S', 'In-house', '112, 113'],
+    ['Deluxe', 'Deluxe', 'J', 'In-house', '112, 113'],
     ['Classic villa', 'Classic villa', 'SW', 'In-house', '501, 502, 503, 504, 505, 506'],
     ['Deluxe villa', 'Deluxe villa', 'SW', 'In-house', '601, 602, 603, 604'],
     ['Royal villa', 'Royal villa', 'SW', 'In-house', '701'],
@@ -444,7 +444,7 @@ var Calc = (function () {
     };
     var errors = [];
     if (!p.type) errors.push('Choose walk-in visit, booking, admission or discharge.');
-    if (p.type === 'move') return checkMove(p, others, idx, blocks);
+    if (p.type === 'move') return checkMove(p, others, idx, blocks, cats);
     if (p.type === 'carried') {
       // A patient already in house on 30 Sep leaving: only the discharge date is needed.
       if (!p.name) p.name = 'Admitted before ' + addDays(OPENING_DATE, 1);
@@ -491,13 +491,33 @@ var Calc = (function () {
         return b.room === p.room && b.from < stayEnd(p) && (!b.until || b.until >= p.admission);
       })[0];
       if (blocked) errors.push('Room ' + p.room + ' is out of service from ' + blocked.from + (blocked.until ? ' to ' + blocked.until : '') + '.');
+      // A patient going into an empty room needs a free room in that category on the admission date.
+      if (!errors.length && !occupiedOn(p.room, p.admission, others, moves, idx)) {
+        var cat = idx.byRoom[p.room];
+        if (freeInCategory(cat, p.admission, cats, others, blocks) <= 0) errors.push(fullMessage(cat, p.admission));
+      }
     }
     delete p.share;
     return { patient: p, errors: errors };
   }
 
+  // Patients in the room at the end of day d (room changes included).
+  function occupiedOn(room, d, others, moves, idx) {
+    return others.some(function (o) { return inHouseOn(o, d) && canonRoom(roomOn(o, d, moves), idx) === room; });
+  }
+  // Rooms of the category still free on day d, as the report counts them: rooms out of service, rooms
+  // occupied by patients entered since 1 Oct, and rooms still held by patients from 30 Sep are all taken.
+  function freeInCategory(cat, d, cats, others, blocks) {
+    var v = day(d, cats, others, blocks, {});
+    return cat.rooms.length - v['occ:' + cat.name] - v['oos:' + cat.name];
+  }
+  function fullMessage(cat, d) {
+    return 'No ' + cat.name + ' room is available on ' + d + ': all ' + cat.rooms.length +
+      ' are occupied or out of service (rooms still held by patients from 30 Sep included). Choose another category, or tick "sharing a room" for an occupied room.';
+  }
+
   // A room change: the patient must be in house on that date, and the new room free (or "sharing" ticked).
-  function checkMove(m, others, idx, blocks) {
+  function checkMove(m, others, idx, blocks, cats) {
     var errors = [];
     var pid = movedPatientId(m);
     var p = others.filter(function (o) { return o.id === pid && isAdmitted(o); })[0];
@@ -521,6 +541,12 @@ var Calc = (function () {
       }
       var blocked = (blocks || []).filter(function (b) { return b.room === m.room && blockedOn(b, m.visitDate); })[0];
       if (blocked) errors.push('Room ' + m.room + ' is out of service on ' + m.visitDate + '.');
+      // Moving into an empty room needs a free room in its category (the patient's own room counts as freed).
+      if (!errors.length && !here.length) {
+        var cat = idx.byRoom[m.room];
+        var withoutPatient = others.filter(function (o) { return o.id !== p.id && movedPatientId(o) !== p.id; });
+        if (freeInCategory(cat, m.visitDate, cats, withoutPatient, blocks) <= 0) errors.push(fullMessage(cat, m.visitDate));
+      }
     }
     if (p) m.name = p.name;
     m.source = ''; m.admission = null; m.plannedAdmission = null; m.plannedDischarge = null; m.discharge = null;
@@ -529,13 +555,32 @@ var Calc = (function () {
     return { patient: m, errors: errors };
   }
 
-  function checkBlock(input, cats) {
+  // A room out of service from 'from' to 'until' (inclusive; blank 'until' = until put back in service).
+  // With patients given, a room cannot be taken out of service while a patient is in it during that period.
+  function checkBlock(input, cats, patients, blocks) {
     var idx = roomIndex(cats);
     var b = { id: input.id || '', room: roomName(input.room), from: toIso(input.from), until: toIso(input.until), reason: String(input.reason || '').trim() };
     var errors = [];
     if (!idx.byRoom[b.room]) errors.push('Choose a room from the Room Categories tab.');
     if (!b.from) errors.push('Enter the date the room goes out of service.');
-    if (b.until && b.from && b.until < b.from) errors.push('"Until" is before "from".');
+    if (b.until && b.from && b.until < b.from) errors.push('The end date is before the start date.');
+    if (!errors.length && patients) {
+      var moves = movesByPatient(patients);
+      var last = b.until || '9999-12-31';
+      var inRoom = patients.filter(function (o) {
+        return isAdmitted(o) && staySegments(o, moves, idx).some(function (s) { return s.room === b.room && s.from <= last && b.from < s.to; });
+      });
+      if (inRoom.length) {
+        errors.push('Room ' + b.room + ' has ' + inRoom.map(function (o) { return o.name + ' (' + o.admission + (o.discharge ? ' to ' + o.discharge : ', still in') + ')'; }).join(', ') +
+          ' during that period. Choose dates when the room is empty, or move the patient first (Patients → Room change).');
+      }
+      // The room must be one of the category's free rooms (rooms still held by 30 Sep patients count as taken).
+      var cat = idx.byRoom[b.room];
+      var others = (blocks || []).filter(function (o) { return o.id !== b.id || !b.id; });
+      if (!errors.length && freeInCategory(cat, b.from, cats, patients, others) <= 0) {
+        errors.push('No ' + cat.name + ' room is free on ' + b.from + ' (all ' + cat.rooms.length + ' are occupied or out of service, rooms still held by patients from 30 Sep included), so none can be taken out of service.');
+      }
+    }
     return { block: b, errors: errors };
   }
 
@@ -666,10 +711,27 @@ function ensureTabs_() {
   if (missing) setup();
   repairIds_();
   renumberHotelRooms_();
+  deluxeToJBlock_();
 }
 
 // Hotel rooms 1 and 2 became 171 and 172 (28 Oct). Changes only that cell of Room Categories, and only while
 // it still reads exactly "1, 2". Entries saved with room 1 or 2 are counted in 171 / 172 (see Calc.canonRoom).
+// Deluxe belongs to J block (29 Oct). Sets that one Block cell once; a later change made in the sheet is kept.
+function deluxeToJBlock_() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('DELUXE_J_BLOCK_DONE')) return;
+  var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
+  if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
+  var rows = sh.getRange(ROOMS_FIRST_ROW, 1, sh.getLastRow() - ROOMS_FIRST_ROW + 1, 3).getDisplayValues();
+  for (var i = 0; i < rows.length; i++) {
+    if (/^deluxe$/i.test(String(rows[i][0]).trim())) {
+      if (String(rows[i][2]).trim() !== 'J') { sh.getRange(ROOMS_FIRST_ROW + i, 3).setValue('J'); refresh_(); }
+      break;
+    }
+  }
+  props.setProperty('DELUXE_J_BLOCK_DONE', 'yes');
+}
+
 function renumberHotelRooms_() {
   var sh = SpreadsheetApp.getActive().getSheetByName(ROOMS);
   if (!sh || sh.getLastRow() < ROOMS_FIRST_ROW) return;
@@ -745,7 +807,7 @@ function savePatient_(d, input) {
 }
 
 function saveBlock_(d, input) {
-  var res = Calc.checkBlock(input, d.categories);
+  var res = Calc.checkBlock(input, d.categories, d.patients, d.blocks.filter(function (b) { return b.id !== input.id; }));
   if (res.errors.length) throw new Error(res.errors.join(' '));
   var b = res.block;
   b.category = Calc.roomIndex(d.categories).byRoom[b.room].name;
@@ -845,7 +907,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 13;
+var BACKEND_VERSION = 14;
 
 function readAll_() {
   return {
