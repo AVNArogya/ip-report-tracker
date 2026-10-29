@@ -388,7 +388,8 @@
     if ($('#pf-source').value && p.source !== $('#pf-source').value) return false;
     var from = $('#pf-from').value, to = $('#pf-to').value;
     if (from || to) {
-      var d = $('#pf-datefield').value === 'discharge' ? p.discharge : (p.admission || p.plannedAdmission);
+      var field = $('#pf-datefield').value;
+      var d = field === 'discharge' ? p.discharge : field === 'plannedDischarge' ? p.plannedDischarge : (p.admission || p.plannedAdmission);
       if (!d || (from && d < from) || (to && d > to)) return false;
     }
     return true;
