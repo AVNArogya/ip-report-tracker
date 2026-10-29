@@ -291,8 +291,9 @@ var Calc = (function () {
         return;
       }
       if (counted && p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
-      // Planned for tomorrow: a booking, or a booking since admitted (it stays counted on this day).
-      if ((p.type === 'booking' || p.type === 'admission' || p.type === 'visit') && p.plannedAdmission === tomorrow) {
+      // Planned admissions are counted on their planned admission date (not the day they were entered):
+      // a booking, or a booking since admitted (it stays counted on that day).
+      if ((p.type === 'booking' || p.type === 'admission' || p.type === 'visit') && p.plannedAdmission === d) {
         if (p.source === WALK_IN) v.plannedWalkIn++;
         else if (p.source === SOURCES[1]) v.plannedVirtual++;
         else v.plannedOther++;

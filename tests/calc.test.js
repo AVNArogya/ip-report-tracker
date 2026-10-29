@@ -92,8 +92,11 @@ test('sharing, extensions, planned discharges and bookings', () => {
   assert.strictEqual(v.totalOccupied, 49);
   assert.strictEqual(v.extended, 1);
   assert.strictEqual(v.dischargesConfirmed, 2);
-  assert.strictEqual(v.plannedVirtual, 1);
-  assert.strictEqual(v.plannedOther, 1);
+  // Bookings planned for 4 Oct count on 4 Oct only, not on the days before.
+  assert.strictEqual(v.plannedVirtual + v.plannedOther, 0);
+  const v4 = Calc.day('2026-10-04', cats, patients, [], {});
+  assert.strictEqual(v4.plannedVirtual, 1);
+  assert.strictEqual(v4.plannedOther, 1);
   assert.strictEqual(v.walkInVisits, 2); // the visit and the walk-in admitted that day
   assert.strictEqual(v.beforePlan, 1);
   assert.strictEqual(v.asPlanned, 0);
@@ -307,17 +310,18 @@ test('hotel rooms renumbered 171 and 172: an entry saved as room 1 counts in 171
   assert.match(Calc.checkPatient({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-20', room: '171' }, [old], cats, []).errors.join(' '), /occupied/);
 });
 
-test('a planned admission stays counted on the day before after the patient is admitted', () => {
-  const booking = { id: 'b1', type: 'booking', name: 'L', source: WALK, visitDate: '2026-10-29', plannedAdmission: '2026-10-31' };
-  const before = Calc.day('2026-10-30', cats, [booking], [], {});
-  assert.strictEqual(before.plannedWalkIn, 1);
-  const admitted = Object.assign({}, booking, { type: 'admission', admission: '2026-10-31', room: 'J 6', extensions: [] });
-  const after30 = Calc.day('2026-10-30', cats, [admitted], [], {}), after31 = Calc.day('2026-10-31', cats, [admitted], [], {});
-  assert.strictEqual(after30.plannedWalkIn, 1);          // still counted on 30 Oct
-  assert.strictEqual(after31.admitted, 1);
-  assert.strictEqual(after31.asPlanned, 1);
-  assert.strictEqual(after31.plannedWalkIn, 0);
+test('a planned admission counts only on its planned date, and stays counted after the patient is admitted', () => {
+  // Entered on 29 Oct for 30 Oct: 1 on 30 Oct only.
+  const booking = { id: 'b1', type: 'booking', name: 'L', source: WALK, visitDate: '2026-10-29', plannedAdmission: '2026-10-30' };
+  const n = (d, list) => { const v = Calc.day(d, cats, list, [], {}); return v.plannedWalkIn + v.plannedVirtual + v.plannedOther; };
+  assert.deepStrictEqual(['2026-10-29', '2026-10-30', '2026-10-31'].map(d => n(d, [booking])), [0, 1, 0]);
+  const admitted = Object.assign({}, booking, { type: 'admission', admission: '2026-10-30', room: 'J 6', extensions: [] });
+  assert.deepStrictEqual(['2026-10-29', '2026-10-30', '2026-10-31'].map(d => n(d, [admitted])), [0, 1, 0]);
+  const v30 = Calc.day('2026-10-30', cats, [admitted], [], {});
+  assert.strictEqual(v30.plannedWalkIn, 1);
+  assert.strictEqual(v30.admitted, 1);
+  assert.strictEqual(v30.asPlanned, 1);
   // Admissions without a planned date and room changes are not planned admissions.
-  const plain = Calc.day('2026-10-30', cats, [admit('a', 'J 7', '2026-10-31'), { id: 'a/move/1', type: 'move', room: 'J 8', visitDate: '2026-10-31' }], [], {});
+  const plain = Calc.day('2026-10-31', cats, [admit('a', 'J 7', '2026-10-31'), { id: 'a/move/1', type: 'move', room: 'J 8', visitDate: '2026-10-31' }], [], {});
   assert.strictEqual(plain.plannedWalkIn + plain.plannedVirtual + plain.plannedOther, 0);
 });

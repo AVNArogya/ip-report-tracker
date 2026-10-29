@@ -561,7 +561,7 @@
   /* ---------- planned admissions ---------- */
 
   // A planned admission is saved as a booking (type 'booking'): the IP Report already counts bookings in its
-  // "Planned admissions" columns, on the row of the day before the planned date. When the patient arrives,
+  // "Planned admissions" columns, on the row of the planned admission date. When the patient arrives,
   // "Admit" turns the booking into the admission (keeping the planned date, for As planned / Before plan).
   var pform = $('#planned');
   var pf = function (name) { return pform.elements.namedItem(name); };
@@ -595,7 +595,7 @@
     });
     var date = rec.plannedAdmission;
     save('savePatient', rec, (plannedEditing ? 'Updated ' : 'Saved ') + rec.name + ': planned admission ' + short(date) +
-      ', counted under Planned admissions (' + plannedColumn(rec) + ') on the ' + short(Calc.addDays(date, -1)) + ' row.').then(function () {
+      ', counted under Planned admissions (' + plannedColumn(rec) + ') on the ' + short(date) + ' row.').then(function () {
       resetPlanned();
       $('#pl-date').value = date;
       renderPlanned();
@@ -611,7 +611,7 @@
     $('#pl-summary').innerHTML = [['Planned for', fmtDate(date)], ['Walk-in', n('Walk-in')], ['Virtual', n('Virtual')],
       ['Corporate / clinic / other', n('Corporate / clinic / other')], ['Total', day.length]]
       .map(function (c) { return '<div class="stat"><span>' + c[0] + '</span><b>' + c[1] + '</b></div>'; }).join('') +
-      '<p class="hint planned-row">These are counted in the IP Report row for <b>' + fmtDate(Calc.addDays(date, -1)) + '</b>.</p>';
+      '<p class="hint planned-row">These are counted in the IP Report row for <b>' + fmtDate(date) + '</b>.</p>';
     var row = function (p, i) {
       return '<tr data-id="' + esc(p.id) + '"><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(p.phone) + '</td><td>' + esc(p.source) +
         '</td><td>' + short(p.plannedAdmission) + '</td><td>' + short(p.visitDate) + '</td><td>' + esc(p.notes) + '</td><td class="acts">' +
