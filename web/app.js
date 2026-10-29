@@ -517,7 +517,7 @@
         var active = b.from <= state.today && (!b.until || b.until >= state.today);
         return '<tr data-id="' + esc(b.id) + '"><td>' + esc(b.room) + '</td><td>' + esc(catOf(b.room)) + '</td><td>' + esc(c && c.block ? c.block : '-') + '</td><td>' + short(b.from) + '</td><td>' +
           (b.until ? short(b.until) : 'until put back') + '</td><td>' + st + '</td><td>' + esc(b.reason) + '</td><td class="acts">' +
-          (active ? '<button data-a="back">Put back in service</button>' : '') + '<button data-a="del" class="danger">Delete</button></td></tr>';
+          (active ? '<button data-a="back">Put back in service</button>' : '') + '<button data-a="edit">Edit</button><button data-a="del" class="danger">Delete</button></td></tr>';
       }).join('') || '<tr><td colspan="8" class="empty">No rooms out of service.</td></tr>') + '</tbody>';
     renderOosRooms();
   }
@@ -537,7 +537,9 @@
     if (!of('oosFrom').value) of('oosFrom').value = state.today;
     var from = of('oosFrom').value || state.today;
     var current = of('oosRoom').value;
-    var board = Calc.roomBoard(from, cats, state.patients, state.blocks).filter(function (r) { return r.category === of('oosCat').value; });
+    var editingId = of('oosId').value; // the entry being edited doesn't count against its own room
+    var others = state.blocks.filter(function (b) { return b.id !== editingId; });
+    var board = Calc.roomBoard(from, cats, state.patients, others).filter(function (r) { return r.category === of('oosCat').value; });
     of('oosRoom').innerHTML = '<option value="">Choose a room</option>' + board.map(function (r) {
       var note = r.patients.length ? ' (occupied: ' + r.patients.map(function (p) { return p.name; }).join(', ') + ')' : r.status === 'out' ? ' (already out of service)' : '';
       return '<option value="' + esc(r.room) + '">' + esc(r.room + note) + '</option>';
@@ -547,12 +549,36 @@
   ['oosCat', 'oosFrom'].forEach(function (n) { of(n).addEventListener('change', renderOosRooms); });
   oform.addEventListener('submit', function (e) {
     e.preventDefault();
-    var rec = { room: of('oosRoom').value, from: of('oosFrom').value, until: of('oosUntil').value, reason: of('oosReason').value };
-    save('saveBlock', rec, 'Room ' + rec.room + ' is out of service from ' + short(rec.from) + (rec.until ? ' to ' + short(rec.until) : ' until put back in service') + '.').then(function () {
-      of('oosRoom').value = ''; of('oosUntil').value = ''; of('oosReason').value = '';
+    var rec = { id: of('oosId').value, room: of('oosRoom').value, from: of('oosFrom').value, until: of('oosUntil').value, reason: of('oosReason').value };
+    var msg = 'Room ' + rec.room + ' is out of service from ' + short(rec.from) + (rec.until ? ' to ' + short(rec.until) : ' until put back in service') + '.';
+    save('saveBlock', rec, (rec.id ? 'Updated. ' : '') + msg).then(function () {
+      resetOos();
       $('#rooms-date').value = rec.from; renderBoard();
     }, function () {});
   });
+  // Back to a new entry (after saving, or Cancel while editing).
+  function resetOos() {
+    of('oosId').value = ''; of('oosRoom').value = ''; of('oosUntil').value = ''; of('oosReason').value = '';
+    $('#oos-title').textContent = 'Mark a room out of service';
+    $('#oos-save').textContent = 'Mark out of service';
+    $('#oos-cancel').hidden = true;
+  }
+  // Loads an out-of-service entry into the form: room, dates and reason can all be changed.
+  function editOos(b) {
+    var c = Calc.roomIndex(state.categories).byRoom[b.room];
+    of('oosId').value = b.id;
+    if (c) of('oosCat').value = c.name;
+    of('oosFrom').value = b.from || state.today;
+    renderOosRooms();
+    of('oosRoom').value = b.room;
+    of('oosUntil').value = b.until || '';
+    of('oosReason').value = b.reason || '';
+    $('#oos-title').textContent = 'Edit out of service: room ' + b.room;
+    $('#oos-save').textContent = 'Save changes';
+    $('#oos-cancel').hidden = false;
+    oform.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  $('#oos-cancel').addEventListener('click', resetOos);
   $('#rooms-date').addEventListener('change', renderBoard);
   $('#board').addEventListener('click', function (e) {
     var tile = e.target.closest('.tile');
@@ -592,6 +618,7 @@
     var btn = e.target.closest('button[data-a]');
     if (!btn) return;
     var b = state.blocks.filter(function (x) { return x.id === btn.closest('tr').dataset.id; })[0];
+    if (btn.dataset.a === 'edit') { editOos(b); return; }
     if (btn.dataset.a === 'del') { if (confirm('Delete this out-of-service entry?')) save('deleteBlock', { id: b.id }, 'Deleted.'); }
     else ask('Put room ' + b.room + ' back in service', '<label>Last day out of service <input type="date" name="until" required value="' + (Calc.addDays(state.today, -1) < b.from ? b.from : Calc.addDays(state.today, -1)) + '"></label>',
       function (v) { save('saveBlock', Object.assign({}, b, { until: v.until }), 'Room ' + b.room + ' back in service.'); });

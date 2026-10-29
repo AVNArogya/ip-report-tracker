@@ -135,7 +135,8 @@
       <div id="board"></div>
 
       <form id="oos-form" class="card oos-form" autocomplete="off">
-        <h2>Mark a room out of service</h2>
+        <h2 id="oos-title">Mark a room out of service</h2>
+        <input type="hidden" name="oosId">
         <div class="grid">
           <label>Room category <select name="oosCat"></select></label>
           <label>Room <select name="oosRoom" required></select></label>
@@ -145,7 +146,10 @@
         </div>
         <p class="hint">The room can't be given to a patient from the start date to the end date (both included), and is counted out of service in its
           category and block. Leave the end date blank to keep it out until you put it back in service below.</p>
-        <div class="actions"><button type="submit" class="primary">Mark out of service</button></div>
+        <div class="actions">
+          <button type="submit" class="primary" id="oos-save">Mark out of service</button>
+          <button type="button" id="oos-cancel" hidden>Cancel</button>
+        </div>
       </form>
 
       <h3>Rooms out of service</h3>
