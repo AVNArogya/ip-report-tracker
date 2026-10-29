@@ -306,3 +306,18 @@ test('hotel rooms renumbered 171 and 172: an entry saved as room 1 counts in 171
   assert.strictEqual(Calc.roomBoard('2026-10-20', cats, [old], []).find(r => r.room === '171').patients.length, 1);
   assert.match(Calc.checkPatient({ name: 'N', source: WALK, type: 'admission', admission: '2026-10-20', room: '171' }, [old], cats, []).errors.join(' '), /occupied/);
 });
+
+test('a planned admission stays counted on the day before after the patient is admitted', () => {
+  const booking = { id: 'b1', type: 'booking', name: 'L', source: WALK, visitDate: '2026-10-29', plannedAdmission: '2026-10-31' };
+  const before = Calc.day('2026-10-30', cats, [booking], [], {});
+  assert.strictEqual(before.plannedWalkIn, 1);
+  const admitted = Object.assign({}, booking, { type: 'admission', admission: '2026-10-31', room: 'J 6', extensions: [] });
+  const after30 = Calc.day('2026-10-30', cats, [admitted], [], {}), after31 = Calc.day('2026-10-31', cats, [admitted], [], {});
+  assert.strictEqual(after30.plannedWalkIn, 1);          // still counted on 30 Oct
+  assert.strictEqual(after31.admitted, 1);
+  assert.strictEqual(after31.asPlanned, 1);
+  assert.strictEqual(after31.plannedWalkIn, 0);
+  // Admissions without a planned date and room changes are not planned admissions.
+  const plain = Calc.day('2026-10-30', cats, [admit('a', 'J 7', '2026-10-31'), { id: 'a/move/1', type: 'move', room: 'J 8', visitDate: '2026-10-31' }], [], {});
+  assert.strictEqual(plain.plannedWalkIn + plain.plannedVirtual + plain.plannedOther, 0);
+});

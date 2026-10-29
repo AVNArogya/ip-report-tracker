@@ -293,7 +293,8 @@ var Calc = (function () {
         return;
       }
       if (counted && p.source === WALK_IN && p.visitDate === d) v.walkInVisits++;
-      if (p.type !== 'admission' && p.plannedAdmission === tomorrow) {
+      // Planned for tomorrow: a booking, or a booking since admitted (it stays counted on this day).
+      if ((p.type === 'booking' || p.type === 'admission' || p.type === 'visit') && p.plannedAdmission === tomorrow) {
         if (p.source === WALK_IN) v.plannedWalkIn++;
         else if (p.source === SOURCES[1]) v.plannedVirtual++;
         else v.plannedOther++;
@@ -840,7 +841,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 10;
+var BACKEND_VERSION = 11;
 
 function readAll_() {
   return {
