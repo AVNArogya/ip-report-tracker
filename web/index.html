@@ -19,6 +19,7 @@
       <button data-tab="planned">Planned admissions</button>
       <button data-tab="patients">Patients</button>
       <button data-tab="rooms">Rooms</button>
+      <button data-tab="oos">Out of service</button>
       <button data-tab="report">Report</button>
     </nav>
   </header>
@@ -121,6 +122,16 @@
         </div>
         <input id="patient-search" type="search" placeholder="Search name, phone or room">
       </div>
+      <div class="toolbar patient-filters" id="patient-filters">
+        <label>Room category <select id="pf-cat"><option value="">All categories</option></select></label>
+        <label>Block <select id="pf-block"><option value="">All blocks</option></select></label>
+        <label>Source <select id="pf-source"><option value="">All sources</option></select></label>
+        <label>Date <select id="pf-datefield"><option value="admission">Admission date</option><option value="discharge">Discharge date</option></select></label>
+        <label>From <input type="date" id="pf-from"></label>
+        <label>To <input type="date" id="pf-to"></label>
+        <button type="button" id="pf-clear">Clear filters</button>
+      </div>
+      <p class="hint" id="patient-count"></p>
       <div class="table-wrap"><table id="patient-table" class="list"></table></div>
     </section>
 
@@ -131,9 +142,15 @@
         <span class="legend"><i class="available"></i>Available <i class="admitted"></i>Admitted today <i class="occupied"></i>Occupied
           <i class="discharged"></i>Discharged today <i class="shared"></i>Shared (number of patients shown) <i class="out"></i>Out of service</span>
       </div>
-      <div id="oos-summary" class="cards"></div>
+      <div id="rooms-summary" class="cards"></div>
       <div id="board"></div>
 
+    </section>
+
+    <!-- Out of service: rooms that can't be given to patients for a period -->
+    <section id="tab-oos" class="tab" hidden>
+      <div class="toolbar"><label>Date <input type="date" id="oos-date"></label></div>
+      <div id="oos-summary" class="cards"></div>
       <form id="oos-form" class="card oos-form" autocomplete="off">
         <h2 id="oos-title">Mark a room out of service</h2>
         <input type="hidden" name="oosId">

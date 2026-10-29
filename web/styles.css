@@ -95,3 +95,8 @@ ul.occupants { padding-left: 18px; margin: 0 0 10px; }
 .cards .planned-row { grid-column: 1 / -1; margin: 0; }
 .oos-form { margin: 18px 0 6px; }
 #oos-summary { margin: 10px 0; }
+.patient-filters { margin-top: -4px; }
+.patient-filters label { min-width: 150px; }
+#rooms-summary .stat b small { font-size: 13px; color: var(--muted); font-weight: 600; }
+.stat-note { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.stat-total { border-color: var(--blue); background: var(--blue-l); }

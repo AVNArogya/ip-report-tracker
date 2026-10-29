@@ -159,7 +159,7 @@
   }
   $$('#tabs button').forEach(function (b) { b.addEventListener('click', function () { showTab(b.dataset.tab); }); });
 
-  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderReport(); renderDatewise(); renderPlanned(); }
+  function renderAll() { renderRoomOptions(); renderPatients(); renderBoard(); renderOos(); renderReport(); renderDatewise(); renderPlanned(); }
 
   /* ---------- entry form ---------- */
 
@@ -354,13 +354,6 @@
       save('deletePatient', { id: p.id }, 'Deleted.');
     }
   }
-  function markOut(room) {
-    ask('Room ' + room + ': out of service',
-      '<label>From <input type="date" name="from" required value="' + ($('#rooms-date').value || state.today) + '"></label>' +
-      '<label>Until (blank = until put back) <input type="date" name="until"></label>' +
-      '<label>Reason <input name="reason"></label>',
-      function (v) { save('saveBlock', { room: room, from: v.from, until: v.until, reason: v.reason }, 'Room ' + room + ' marked out of service.'); });
-  }
 
   /* ---------- patients list ---------- */
 
@@ -374,6 +367,41 @@
   });
   $('#patient-search').addEventListener('input', renderPatients);
 
+  // Extra filters: category and block of the patient's current room, source, and a date range on the
+  // admission or discharge date. They combine with the chips above and the search.
+  function fillPatientFilters() {
+    var fill = function (sel, values, all) {
+      var keep = sel.value;
+      sel.innerHTML = '<option value="">' + all + '</option>' + values.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
+      sel.value = values.indexOf(keep) >= 0 ? keep : '';
+    };
+    fill($('#pf-cat'), state.categories.map(function (c) { return c.name; }), 'All categories');
+    fill($('#pf-block'), Calc.blocksOf(state.categories).map(function (b) { return b + ' block'; })
+      .concat(state.categories.filter(function (c) { return !Calc.isInHouse(c); }).map(function (c) { return c.name; })), 'All blocks');
+    fill($('#pf-source'), Calc.SOURCES, 'All sources');
+  }
+  function blockLabel(cat) { return !cat ? '' : Calc.isInHouse(cat) && cat.block ? cat.block + ' block' : cat.name; }
+  function matchesFilters(p) {
+    var cat = Calc.roomIndex(state.categories).byRoom[Calc.canonRoom(currentRoom(p), Calc.roomIndex(state.categories))];
+    if ($('#pf-cat').value && (!cat || cat.name !== $('#pf-cat').value)) return false;
+    if ($('#pf-block').value && blockLabel(cat) !== $('#pf-block').value) return false;
+    if ($('#pf-source').value && p.source !== $('#pf-source').value) return false;
+    var from = $('#pf-from').value, to = $('#pf-to').value;
+    if (from || to) {
+      var d = $('#pf-datefield').value === 'discharge' ? p.discharge : (p.admission || p.plannedAdmission);
+      if (!d || (from && d < from) || (to && d > to)) return false;
+    }
+    return true;
+  }
+  ['#pf-cat', '#pf-block', '#pf-source', '#pf-datefield', '#pf-from', '#pf-to'].forEach(function (sel) {
+    $(sel).addEventListener('change', renderPatients);
+  });
+  $('#pf-clear').addEventListener('click', function () {
+    ['#pf-cat', '#pf-block', '#pf-source', '#pf-from', '#pf-to'].forEach(function (sel) { $(sel).value = ''; });
+    $('#pf-datefield').value = 'admission';
+    renderPatients();
+  });
+
   function stateOf(p) {
     if (p.type === 'visit') return 'Walk-in visit';
     if (p.type === 'booking') return 'Booking';
@@ -384,6 +412,7 @@
   }
 
   function renderPatients() {
+    fillPatientFilters();
     var q = $('#patient-search').value.trim().toLowerCase();
     var list = state.patients.filter(function (p) {
       if (Calc.isMove(p)) return false; // room changes are shown with their patient, not as patients
@@ -392,6 +421,7 @@
       if (filter === 'booking' && p.type !== 'booking') return false;
       if (filter === 'visit' && p.type !== 'visit') return false;
       if (filter === 'discharged' && s !== 'Discharged') return false;
+      if (!matchesFilters(p)) return false;
       return !q || [p.name, p.phone, p.room].join(' ').toLowerCase().indexOf(q) >= 0;
     }).sort(function (a, b) {
       return String(b.admission || b.plannedAdmission || b.visitDate).localeCompare(String(a.admission || a.plannedAdmission || a.visitDate));
@@ -416,7 +446,8 @@
         '<td class="acts">' + acts.join('') + '</td></tr>';
     });
     $('#patient-table').innerHTML = '<thead><tr><th>Patient</th><th>Status</th><th>Source</th><th>Room</th><th>Dates</th><th></th></tr></thead><tbody>' +
-      (rows.join('') || '<tr><td colspan="6" class="empty">Nothing here yet.</td></tr>') + '</tbody>';
+      (rows.join('') || '<tr><td colspan="6" class="empty">No patients match these filters.</td></tr>') + '</tbody>';
+    $('#patient-count').textContent = list.length + (list.length === 1 ? ' patient' : ' patients') + ' shown.';
   }
   $('#patient-table').addEventListener('click', function (e) {
     var btn = e.target.closest('button[data-a]');
@@ -497,14 +528,32 @@
         }).join('') + '</div></div>';
     }).join('');
 
-    // Rooms out of service on the chosen date: total and by block (the IP Report's J / S / SW block columns).
-    var blockNames = Calc.blocksOf(state.categories);
+    // Available rooms on the chosen date, block by block (J, S, SW), then apartment and hotel rooms, then all.
+    // Available = rooms − occupied − out of service, as in the report.
+    var groups = Calc.blocksOf(state.categories).map(function (b) {
+      return { label: b + ' block', cats: state.categories.filter(function (c) { return Calc.isInHouse(c) && c.block === b; }) };
+    }).concat(state.categories.filter(function (c) { return !Calc.isInHouse(c) || !c.block; }).map(function (c) { return { label: c.name, cats: [c] }; }));
+    var sum = function (cats, key) { return cats.reduce(function (a, c) { return a + (key === 'rooms' ? c.rooms.length : counts[key + c.name]); }, 0); };
+    $('#rooms-summary').innerHTML = groups.map(function (g) {
+      var rooms = sum(g.cats, 'rooms'), occ = sum(g.cats, 'occ:'), out = sum(g.cats, 'oos:');
+      return '<div class="stat"><span>' + esc(g.label) + ' available</span><b>' + Math.max(0, rooms - occ - out) + ' <small>of ' + rooms + '</small></b>' +
+        '<small class="stat-note">' + g.cats.map(function (c) { return esc(c.short || c.name); }).join(', ') + '</small></div>';
+    }).join('') + '<div class="stat stat-total"><span>All rooms available on ' + short(date) + '</span><b>' + counts.totalAvailable + ' <small>of ' + counts.totalRooms + '</small></b></div>';
+  }
+
+  /* ---------- out of service tab ---------- */
+
+  // Rooms out of service on the chosen date (total and by block, as the IP Report's J / S / SW block
+  // columns count them), the list of out-of-service entries, and the form.
+  function renderOos() {
+    var date = $('#oos-date').value || state.today;
+    $('#oos-date').value = date;
+    var counts = Calc.day(date, state.categories, state.patients, state.blocks, state.plan);
     var outside = state.categories.filter(function (c) { return !Calc.isInHouse(c); })
       .reduce(function (a, c) { return a + counts['oos:' + c.name]; }, 0);
     $('#oos-summary').innerHTML = [['Out of service on ' + short(date), counts.totalOutOfService]]
-      .concat(blockNames.map(function (b) { return [b + ' block', counts['oosBlock:' + b]]; }))
+      .concat(Calc.blocksOf(state.categories).map(function (b) { return [b + ' block', counts['oosBlock:' + b]]; }))
       .concat(outside ? [['Apartment / hotel', outside]] : [])
-      .concat([['Rooms available', counts.totalAvailable]])
       .map(function (c) { return '<div class="stat"><span>' + esc(c[0]) + '</span><b>' + c[1] + '</b></div>'; }).join('');
 
     var blocks = state.blocks.slice().sort(function (a, b) { return String(b.from).localeCompare(String(a.from)); });
@@ -553,7 +602,7 @@
     var msg = 'Room ' + rec.room + ' is out of service from ' + short(rec.from) + (rec.until ? ' to ' + short(rec.until) : ' until put back in service') + '.';
     save('saveBlock', rec, (rec.id ? 'Updated. ' : '') + msg).then(function () {
       resetOos();
-      $('#rooms-date').value = rec.from; renderBoard();
+      $('#oos-date').value = rec.from; renderOos();
     }, function () {});
   });
   // Back to a new entry (after saving, or Cancel while editing).
@@ -580,6 +629,7 @@
   }
   $('#oos-cancel').addEventListener('click', resetOos);
   $('#rooms-date').addEventListener('change', renderBoard);
+  $('#oos-date').addEventListener('change', renderOos);
   $('#board').addEventListener('click', function (e) {
     var tile = e.target.closest('.tile');
     if (!tile) return;
@@ -604,14 +654,14 @@
           else if (a[0] === 'share') admitTo(r.room, date, true);
         });
     } else if (r.status === 'out') {
-      ask('Room ' + r.room + ' is out of service', '<p>' + esc(r.block.reason || '') + '</p><label class="check"><input type="checkbox" name="back"> Put it back in service from ' + fmtDate(date) + '</label>',
-        function (v) {
-          if (v.back) save('saveBlock', Object.assign({}, r.block, { until: Calc.addDays(date, -1) < r.block.from ? r.block.from : Calc.addDays(date, -1) }), 'Room ' + r.room + ' back in service.');
-        });
+      // Out of service is managed on its own tab: open this entry there.
+      showTab('oos');
+      $('#oos-date').value = date;
+      renderOos();
+      editOos(r.block);
     } else {
-      ask('Room ' + r.room + ' is free on ' + fmtDate(date),
-        '<label>Action <select name="act"><option value="admit">Admit a patient</option><option value="out">Mark out of service</option></select></label>',
-        function (v) { if (v.act === 'admit') admitTo(r.room, date, false); else markOut(r.room); });
+      ask('Room ' + r.room + ' is free on ' + fmtDate(date), '<p>Admit a patient to this room?</p>',
+        function () { admitTo(r.room, date, false); });
     }
   });
   $('#block-table').addEventListener('click', function (e) {
