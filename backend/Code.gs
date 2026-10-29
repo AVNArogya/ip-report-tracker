@@ -110,6 +110,7 @@ function ensureTabs_() {
   var ss = SpreadsheetApp.getActive();
   var missing = [REPORT, ROOMS, PATIENTS, BLOCKS, PLAN].some(function (n) { return !ss.getSheetByName(n); });
   if (missing) setup();
+  fixBlocksTab_();
   repairIds_();
   renumberHotelRooms_();
   deluxeToJBlock_();
@@ -233,23 +234,102 @@ function savePlan_(input) {
 function writeRow_(name, fields, rec, newWithId) {
   var sh = sheet_(name);
   var now = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
+  var col = columnMap_(sh, fields); // each value goes under its own heading, wherever that column is
   var row = rec.id ? findRow_(sh, rec.id) : 0;
   if (!row && rec.id && !newWithId) throw new Error('That entry was not found; it may have been deleted already. Reload the app and try again.');
+  var width = Math.max(sh.getLastColumn(), fields.reduce(function (m, f) { return Math.max(m, col[f[0]]); }, 0));
+  var values = row ? sh.getRange(row, 1, 1, width).getValues()[0] : blankRow_(width);
   if (!row) { rec.id = rec.id || newId_(); rec.created = now; }
-  else rec.created = sh.getRange(row, fieldIndex_(fields, 'created') + 1).getDisplayValue();
+  else rec.created = sh.getRange(row, col.created).getDisplayValue();
   rec.updated = now;
-  var values = [fields.map(function (f) {
+  fields.forEach(function (f) {
     var v = rec[f[0]];
-    if (v === null || v === undefined) return '';
+    if (v === null || v === undefined) v = '';
     // Keep text as typed: phone numbers keep their + and leading 0, and nothing is read as a formula.
     // IDs too: an id like 50807e10 would otherwise be read as a number (5.08E+12).
-    if (typeof v === 'string' && v && (f[0] === 'phone' || f[0] === 'id' || /^[=+\-@]/.test(v))) return "'" + v;
-    return v;
-  })];
-  if (row) sh.getRange(row, 1, 1, fields.length).setValues(values);
-  else sh.appendRow(values[0]);
+    else if (typeof v === 'string' && v && (f[0] === 'phone' || f[0] === 'id' || /^[=+\-@]/.test(v))) v = "'" + v;
+    values[col[f[0]] - 1] = v;
+  });
+  if (row) sh.getRange(row, 1, 1, width).setValues([values]);
+  else sh.appendRow(values);
   return rec;
 }
+
+// Column of each field, found by its heading in row 1 (case ignored). A missing heading is added at the
+// end, so an entry is never written under another field's heading.
+function columnMap_(sh, fields) {
+  var heads = headings_(sh);
+  var col = {};
+  fields.forEach(function (f) {
+    var i = heads.indexOf(f[1].toLowerCase());
+    if (i < 0) {
+      i = heads.length;
+      heads.push(f[1].toLowerCase());
+      sh.getRange(1, i + 1).setValue(f[1]);
+    }
+    col[f[0]] = i + 1;
+  });
+  return col;
+}
+function headings_(sh) {
+  if (sh.getLastColumn() < 1) return [];
+  var heads = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  while (heads.length && heads[heads.length - 1] === '') heads.pop();
+  return heads;
+}
+function idColumn_(sh) {
+  var i = headings_(sh).indexOf('id');
+  return i < 0 ? 1 : i + 1;
+}
+
+// The "Data: out of service" tab of the older Daily IP Report app has other headings (Category, Room,
+// Out of service from, Out of service until…, Reason, Entered by, Updated at). Entries saved there by this
+// app before 29 Oct landed under the wrong headings. Rebuilds the tab once with this app's headings, keeping
+// every entry (both kinds of row); the tab as it was is kept, hidden, as "Data: out of service (old layout)".
+function fixBlocksTab_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(BLOCKS);
+  if (!sh) return;
+  var heads = headings_(sh);
+  var expected = BLOCK_FIELDS.map(function (f) { return f[1].toLowerCase(); });
+  if (expected.every(function (h, i) { return heads[i] === h; })) return;
+  var width = Math.max(sh.getLastColumn(), BLOCK_FIELDS.length);
+  var grid = sh.getRange(1, 1, Math.max(sh.getLastRow(), 1), width).getValues();
+  var backup = ss.getSheetByName(BLOCKS + ' (old layout)') || ss.insertSheet(BLOCKS + ' (old layout)');
+  backup.getRange(1, 1, grid.length, width).setValues(grid);
+  backup.hideSheet();
+
+  var at = function (label, fallback) { var i = heads.indexOf(label); return i < 0 ? fallback : i; };
+  var oldCol = { room: at('room', 1), from: at('out of service from', 2), until: at('out of service until (last day; blank = still out)', 3),
+    reason: at('reason', 4), updated: at('updated at', 6) };
+  var byRoom = Calc.roomIndex(readCategories_()).byRoom;
+  var rows = [];
+  grid.slice(1).forEach(function (r) {
+    if (r.every(function (v) { return v === '' || v === null; })) return;
+    var rec;
+    // Saved by this app by position: ID, Room, Room category, From, Until, Reason, Created, Updated.
+    // (The third column then holds a category name, where the old app kept a date.)
+    if (r[2] !== '' && !isDate_(r[2]) && !Calc.toIso(r[2])) {
+      rec = { id: idText_(r[0]), room: idText_(r[1]), from: isoOf_(r[3]), until: isoOf_(r[4]), reason: idText_(r[5]),
+        created: cellText_(r[6]), updated: cellText_(r[7]) };
+    } else {
+      rec = { id: '', room: idText_(r[oldCol.room]), from: isoOf_(r[oldCol.from]), until: isoOf_(r[oldCol.until]),
+        reason: idText_(r[oldCol.reason]), created: cellText_(r[oldCol.updated]), updated: cellText_(r[oldCol.updated]) };
+    }
+    rec.id = rec.id && !/^[0-9.e+]+$/i.test(rec.id) ? rec.id : newId_();
+    rec.category = byRoom[rec.room] ? byRoom[rec.room].name : '';
+    rows.push(BLOCK_FIELDS.map(function (f) { var v = rec[f[0]]; return v ? "'" + v : ''; }));
+  });
+  sh.clear();
+  sh.getRange(1, 1, 1, BLOCK_FIELDS.length).setValues([BLOCK_FIELDS.map(function (f) { return f[1]; })])
+    .setFontWeight('bold').setBackground(COLOURS.head).setFontColor(COLOURS.headText);
+  if (rows.length) sh.getRange(2, 1, rows.length, BLOCK_FIELDS.length).setValues(rows);
+  sh.hideSheet();
+  refresh_();
+}
+function blankRow_(n) { var r = []; for (var i = 0; i < n; i++) r.push(''); return r; }
+function isDate_(v) { return Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime()); }
+function cellText_(v) { return v instanceof Date ? Utilities.formatDate(v, tz_(), 'yyyy-MM-dd HH:mm') : idText_(v); }
 
 function deleteRow_(name, id) {
   var sh = sheet_(name);
@@ -261,7 +341,7 @@ function deleteRow_(name, id) {
 // IDs are compared exactly as readRows_ hands them to the app, so every entry the app shows can be found.
 function findRow_(sh, id) {
   if (!id || sh.getLastRow() < 2) return 0;
-  var ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  var ids = sh.getRange(2, idColumn_(sh), sh.getLastRow() - 1, 1).getValues();
   for (var i = 0; i < ids.length; i++) if (idText_(ids[i][0]) === String(id)) return i + 2;
   return 0;
 }
@@ -276,7 +356,7 @@ function repairIds_() {
   [PATIENTS, BLOCKS].forEach(function (name) {
     var sh = SpreadsheetApp.getActive().getSheetByName(name);
     if (!sh || sh.getLastRow() < 2) return;
-    var range = sh.getRange(2, 1, sh.getLastRow() - 1, 1);
+    var range = sh.getRange(2, idColumn_(sh), sh.getLastRow() - 1, 1);
     var ids = range.getValues();
     var seen = {}, renamed = {}, changed = false;
     ids.forEach(function (r, i) {
@@ -308,7 +388,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 14;
+var BACKEND_VERSION = 15;
 
 function readAll_() {
   return {

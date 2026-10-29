@@ -47,6 +47,7 @@ class Sheet {
     });
     this.cells = next;
   }
+  clear() { this.cells = {}; }
   hideSheet() { this.hidden = true; } showSheet() { this.hidden = false; }
   hideRows() {} setFrozenRows() {} setFrozenColumns() {} setColumnWidth() {} setRowHeight() {}
   protect() { const p = { setWarningOnly: () => p, setDescription: () => p }; return p; }
@@ -271,6 +272,46 @@ assert.strictEqual(dayAt('2026-10-26')['oosBlock:J'], 1);
 assert.strictEqual(dayAt('2026-10-27')['oosBlock:J'], 0, 'back after the end date');
 const intoOos = post('savePatient', { type: 'admission', name: 'Blocked', source: 'Corporate', admission: '2026-10-26', room: '112' });
 assert.ok(!intoOos.ok && /out of service/.test(intoOos.error));
+
+// The live sheet's "Data: out of service" tab still has the older app's headings. Two entries saved by this app
+// sit under the wrong headings, and one row is in the older app's own format. The next request rebuilds the tab.
+const oosTab = ss.getSheetByName('Data: out of service');
+oosTab.clear();
+['Category', 'Room', 'Out of service from', 'Out of service until (last day; blank = still out)', 'Reason', 'Entered by', 'Updated at']
+  .forEach((h, i) => oosTab.set(1, i + 1, h));
+[['pa1b2c3d', 'J 1', 'Economy', '2026-10-30', '2026-11-02', 'Painting', '2026-10-29 11:00', '2026-10-29 11:00'],
+ ['p9e8d7c6', 'J 8', 'Economy', '2026-10-29', '', 'AC repair', '2026-10-29 11:05', '2026-10-29 11:05'],
+ ['economy', 'J 5', '2026-10-10', '2026-10-12', 'Old app entry', 'Geetha', '2026-10-09 10:00']]
+  .forEach((r, i) => r.forEach((v, j) => oosTab.set(i + 2, j + 1, v)));
+let fixed = ctx.doGet({ parameter: { key: 'test-key', action: 'data' } }).data.blocks;
+const byRoomOos = Object.fromEntries(fixed.map(b => [b.room, b]));
+assert.deepStrictEqual([byRoomOos['J 1'].from, byRoomOos['J 1'].until, byRoomOos['J 1'].reason, byRoomOos['J 1'].id], ['2026-10-30', '2026-11-02', 'Painting', 'pa1b2c3d']);
+assert.deepStrictEqual([byRoomOos['J 8'].from, byRoomOos['J 8'].until, byRoomOos['J 8'].reason], ['2026-10-29', null, 'AC repair']);
+assert.deepStrictEqual([byRoomOos['J 5'].from, byRoomOos['J 5'].until, byRoomOos['J 5'].reason], ['2026-10-10', '2026-10-12', 'Old app entry']);
+assert.strictEqual(oosTab.get(1, 1), 'ID');
+assert.ok(ss.getSheetByName('Data: out of service (old layout)'), 'the old tab is kept');
+const oosDay = Calc.day('2026-10-31', fixed.length && ctx.doGet({ parameter: { key: 'test-key', action: 'data' } }).data.categories, [], fixed, {});
+assert.strictEqual(oosDay['oos:Economy'], 2, 'J 1 and J 8 out of service on 31 Oct');
+// Runs once: a second request leaves the tab as it is.
+ctx.doGet({ parameter: { key: 'test-key', action: 'data' } });
+assert.strictEqual(ss.getSheetByName('Data: out of service').getLastRow(), 4);
+// Saving now writes under the right headings, and editing finds the entry by its ID.
+res = post('saveBlock', Object.assign({}, byRoomOos['J 8'], { until: '2026-10-31' }));
+assert.ok(res.ok, res.error);
+assert.strictEqual(res.data.blocks.find(b => b.room === 'J 8').until, '2026-10-31');
+assert.strictEqual(res.data.blocks.length, 3);
+
+// A data tab whose columns are in another order: values still go under their own headings.
+const pt = ss.getSheetByName('Data: patients');
+const n0 = pt.getLastRow();
+const swap = (a, b) => { for (let r = 1; r <= pt.getLastRow(); r++) { const x = pt.get(r, a); pt.set(r, a, pt.get(r, b)); pt.set(r, b, x); } };
+swap(2, 9); // Patient name <-> Room
+res = post('savePatient', { type: 'admission', name: 'Column test', source: 'Corporate', admission: '2026-10-21', room: '504' });
+assert.ok(res.ok, res.error);
+const ct = res.data.patients.find(p => p.name === 'Column test');
+assert.strictEqual(ct.room, '504');
+assert.strictEqual(pt.get(n0 + 1, 2), '504'); assert.strictEqual(pt.get(n0 + 1, 9), 'Column test');
+swap(2, 9);
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');
