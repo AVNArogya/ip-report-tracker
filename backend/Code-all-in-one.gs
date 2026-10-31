@@ -1001,7 +1001,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 16;
+var BACKEND_VERSION = 17;
 
 function readAll_() {
   return {
@@ -1168,20 +1168,20 @@ function writeReport_(rep, cats, layout) {
 
   // Summary for the shown date.
   // Summary for the date in C1, read from that date's row. A date after today has no row: blank, not 0.
-  var at = function (key) { return lookup_('"' + key + '"', width, '', REPORT_SHOW_CELL, '""'); };
+  var summaryCell = function (key) { return lookup_('"' + key + '"', width, '', REPORT_SHOW_CELL, '""'); };
   var summary = [
     ['Total rooms', '=' + totalRef],
-    ['Occupied rooms', at('totalOccupied')],
+    ['Occupied rooms', summaryCell('totalOccupied')],
     ['Available rooms', '=IF(B3="","",A3-B3-D3)'],
-    ['Out of service', at('totalOutOfService')],
-    ['Walk-in (PCE) admitted', at('src:' + Calc.SOURCES[0])],
-    ['Admitted', at('admitted')],
-    ['Discharged', at('discharged')],
-    ['Patients in house', at('inHousePatients')],
-    ['In-house rooms occupied', at('inHouseOccupied')],
-    ['In-house rooms available', at('inHouseAvailable')],
-    ['Patients sharing a room', at('sharing')],
-    ['In-house occupancy', at('inHouseOccupancy')]
+    ['Out of service', summaryCell('totalOutOfService')],
+    ['Walk-in (PCE) admitted', summaryCell('src:' + Calc.SOURCES[0])],
+    ['Admitted', summaryCell('admitted')],
+    ['Discharged', summaryCell('discharged')],
+    ['Patients in house', summaryCell('inHousePatients')],
+    ['In-house rooms occupied', summaryCell('inHouseOccupied')],
+    ['In-house rooms available', summaryCell('inHouseAvailable')],
+    ['Patients sharing a room', summaryCell('sharing')],
+    ['In-house occupancy', summaryCell('inHouseOccupancy')]
   ];
   sh.getRange(2, 1, 2, width).clear();
   sh.getRange(2, 1, 1, summary.length).setValues([summary.map(function (s) { return s[0]; })])

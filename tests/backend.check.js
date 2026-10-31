@@ -321,5 +321,18 @@ assert.deepStrictEqual(summaryLabels.slice(8), ['In-house rooms occupied', 'In-h
 assert.ok(String(report.get(3, 2)).endsWith(',"")'), 'a date without a row shows a blank');
 assert.strictEqual(report.get(3, 3), '=IF(B3="","",A3-B3-D3)');
 
+// No formula anywhere in the IP Report may point at a column that doesn't exist (#NAME? in the sheet).
+const badFormulas = [];
+for (let r = 1; r <= report.getLastRow(); r++) for (let c = 1; c <= report.getLastColumn(); c++) {
+  const f = String(report.get(r, c));
+  if (f.startsWith('=') && /undefined|NaN/.test(f)) badFormulas.push(r + ',' + c + ': ' + f);
+}
+assert.deepStrictEqual(badFormulas, []);
+const colOf = key => { for (let c = 1; c <= report.getLastColumn(); c++) if (report.get(5, c) === key) return c; };
+const letter = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+assert.ok(String(report.get(7, colOf('inHouseAvailable'))).includes('-' + letter(colOf('inHouseOccupied')) + '7'));
+assert.ok(String(report.get(7, colOf('inHouseOccupancy'))).includes(letter(colOf('inHouseOccupied')) + '7/'));
+assert.strictEqual(report.get(7, colOf('totalAvailable')), '=' + letter(colOf('totalRooms')) + '7-' + letter(colOf('totalOccupied')) + '7-' + letter(colOf('totalOutOfService')) + '7');
+
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');
