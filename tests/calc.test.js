@@ -124,8 +124,10 @@ test('report runs from 30 Sep to today', () => {
   assert.strictEqual(empty.days[0].inHousePatients, 49);
   const r = Calc.report(cats, [admit('1', 'J 1', '2026-10-20', { discharge: '2026-10-25' })], [], {}, '2026-10-22');
   assert.strictEqual(r.dates[0], '2026-09-30');
-  assert.strictEqual(r.dates[r.dates.length - 1], '2026-10-25');
+  // Up to and including today only: the 25 Oct discharge hasn't happened yet, so there is no row for it.
+  assert.strictEqual(r.dates[r.dates.length - 1], '2026-10-22');
   assert.strictEqual(r.days[22].inHousePatients, 50);
+  assert.ok(r.days.every(v => v.discharged === 0));
 });
 
 test('checkPatient catches double booking and allows sharing', () => {

@@ -367,17 +367,10 @@ var Calc = (function () {
     return v;
   }
 
-  // The report's date range: from 30 Sep (the fixed starting position) to today, or to the latest date entered.
+  // The report's date range: from 30 Sep (the fixed starting position) up to and including today. Days that
+  // haven't happened yet aren't shown, so no future admissions or discharges appear in the report.
   function reportRange(patients, blocks, today) {
-    var last = today;
-    function see(x) { if (x && x > last) last = x; }
-    patients.forEach(function (p) {
-      see(p.visitDate);
-      if (isAdmitted(p) || isCarried(p)) { see(p.admission); see(p.discharge); }
-      (p.extensions || []).forEach(see);
-    });
-    (blocks || []).forEach(function (b) { see(b.from); });
-    return { from: OPENING_DATE, to: last };
+    return { from: OPENING_DATE, to: today < OPENING_DATE ? OPENING_DATE : today };
   }
 
   // The whole report: { columns, dates, days: [values by key] }, from 30 Sep.

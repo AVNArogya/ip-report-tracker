@@ -266,8 +266,8 @@ let oos = post('saveBlock', { room: '112', from: '2026-10-24', until: '2026-10-2
 assert.ok(!oos.ok && /Occupant/.test(oos.error), 'occupied room refused');
 oos = post('saveBlock', { room: '112', from: '2026-10-25', until: '2026-10-26', reason: 'Repairs' });
 assert.ok(oos.ok, oos.error); // free from the discharge date
-assert.strictEqual(val('2026-10-25', 'oosBlock:J'), 1, 'Deluxe counts in J block');
 const dayAt = dd => Calc.day(dd, oos.data.categories, oos.data.patients, oos.data.blocks, {});
+assert.strictEqual(dayAt('2026-10-25')['oosBlock:J'], 1, 'Deluxe counts in J block');
 assert.strictEqual(dayAt('2026-10-26')['oosBlock:J'], 1);
 assert.strictEqual(dayAt('2026-10-27')['oosBlock:J'], 0, 'back after the end date');
 const intoOos = post('savePatient', { type: 'admission', name: 'Blocked', source: 'Corporate', admission: '2026-10-26', room: '112' });
@@ -312,6 +312,14 @@ const ct = res.data.patients.find(p => p.name === 'Column test');
 assert.strictEqual(ct.room, '504');
 assert.strictEqual(pt.get(n0 + 1, 2), '504'); assert.strictEqual(pt.get(n0 + 1, 9), 'Column test');
 swap(2, 9);
+
+// The IP Report stops at today (no future rows), and the summary shows blanks for a future date.
+assert.strictEqual(report.getLastRow(), 7 + 22, 'rows 30 Sep to 22 Oct (the mock today)');
+assert.strictEqual(report.get(6, 1), 'Date');
+const summaryLabels = [...Array(12).keys()].map(i => report.get(2, i + 1));
+assert.deepStrictEqual(summaryLabels.slice(8), ['In-house rooms occupied', 'In-house rooms available', 'Patients sharing a room', 'In-house occupancy']);
+assert.ok(String(report.get(3, 2)).endsWith(',"")'), 'a date without a row shows a blank');
+assert.strictEqual(report.get(3, 3), '=IF(B3="","",A3-B3-D3)');
 
 assert.ok(!ctx.doPost({ postData: { contents: JSON.stringify({ key: 'wrong', action: 'savePlan', record: {} }) } }).ok, 'wrong key refused');
 console.log('backend check: ok');

@@ -80,11 +80,30 @@ function onOpen() {
     .addItem('Set up / repair the tabs', 'setup')
     .addItem('Show the data tabs', 'menuShowData')
     .addToUi();
+  try { bringUpToDate_(); } catch (e) { Logger.log(e); } // opening the sheet on a new day adds today's row
 }
 
 function menuRefresh() { withLock_(refresh_); toast_('IP Report refreshed.'); }
 function menuShowData() { [PATIENTS, BLOCKS, PLAN].forEach(function (n) { sheet_(n).showSheet(); }); }
 function toast_(msg) { try { SpreadsheetApp.getActive().toast(msg, 'IP Report', 6); } catch (e) { Logger.log(msg); } }
+
+// The report has a row for every day up to today. A new day only gets its row when the report is rebuilt
+// (a save, the nightly refresh, or this check), so rebuild it whenever its last row is before today.
+function bringUpToDate_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(REPORT);
+  if (!sh) return;
+  var last = sh.getLastRow() >= REPORT_FIRST_ROW ? sh.getRange(sh.getLastRow(), 1).getValue() : '';
+  var lastIso = isDate_(last) ? isoOf_(last) : typeof last === 'number' ? isoFromSerial_(last) : null;
+  if (!lastIso || lastIso !== todayIso_()) refresh_();
+}
+function isoFromSerial_(n) { return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 864e5).toISOString().slice(0, 10); }
+// Switches the nightly refresh on if it isn't (it may never have been installed from the menu).
+function ensureDailyTrigger_() {
+  try {
+    var has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'dailyRefresh'; });
+    if (!has) ScriptApp.newTrigger('dailyRefresh').timeBased().everyDays(1).atHour(0).nearMinute(15).create();
+  } catch (e) { Logger.log('Daily refresh not installed: ' + e); }
+}
 
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
@@ -114,6 +133,8 @@ function ensureTabs_() {
   repairIds_();
   renumberHotelRooms_();
   deluxeToJBlock_();
+  bringUpToDate_();
+  ensureDailyTrigger_();
 }
 
 // Hotel rooms 1 and 2 became 171 and 172 (28 Oct). Changes only that cell of Room Categories, and only while
@@ -388,7 +409,7 @@ function fieldIndex_(fields, key) {
 /* ---------- reading ---------- */
 
 // Bumped with each backend change; the app warns when the sheet's code is older than it expects.
-var BACKEND_VERSION = 15;
+var BACKEND_VERSION = 16;
 
 function readAll_() {
   return {
@@ -524,11 +545,12 @@ function writeRoomLookups_(cats, layout, width, d) {
 }
 
 // Formula: the value in the report's column with key `keyExpr` on the shown date (0 if none).
-function lookup_(keyExpr, width, prefix, dateRef) {
+// ifMissing: what to show when the date has no row (a day not reached yet); 0 unless given.
+function lookup_(keyExpr, width, prefix, dateRef, ifMissing) {
   var lastCol = colLetter_(width);
   var table = prefix + '$A$' + REPORT_FIRST_ROW + ':$' + lastCol;
   return '=IFERROR(INDEX(' + table + ',MATCH(' + dateRef + ',' + prefix + '$A$' + REPORT_FIRST_ROW + ':$A,0),MATCH(' + keyExpr + ',' +
-    prefix + '$A$' + REPORT_KEY_ROW + ':$' + lastCol + '$' + REPORT_KEY_ROW + ',0)),0)';
+    prefix + '$A$' + REPORT_KEY_ROW + ':$' + lastCol + '$' + REPORT_KEY_ROW + ',0)),' + (ifMissing === undefined ? '0' : ifMissing) + ')';
 }
 
 function writeReport_(rep, cats, layout) {
@@ -553,16 +575,21 @@ function writeReport_(rep, cats, layout) {
     .setNumberFormat('ddd d mmm yyyy').setFontWeight('bold');
 
   // Summary for the shown date.
+  // Summary for the date in C1, read from that date's row. A date after today has no row: blank, not 0.
+  var at = function (key) { return lookup_('"' + key + '"', width, '', REPORT_SHOW_CELL, '""'); };
   var summary = [
     ['Total rooms', '=' + totalRef],
-    ['Occupied rooms', lookup_('"totalOccupied"', width, '', REPORT_SHOW_CELL)],
-    ['Available rooms', '=A3-B3-D3'],
-    ['Out of service', lookup_('"totalOutOfService"', width, '', REPORT_SHOW_CELL)],
-    ['Walk-in (PCE) admitted', lookup_('"src:' + Calc.SOURCES[0] + '"', width, '', REPORT_SHOW_CELL)],
-    ['Admitted', lookup_('"admitted"', width, '', REPORT_SHOW_CELL)],
-    ['Discharged', lookup_('"discharged"', width, '', REPORT_SHOW_CELL)],
-    ['Patients in house', lookup_('"inHousePatients"', width, '', REPORT_SHOW_CELL)],
-    ['In-house occupancy', lookup_('"inHouseOccupancy"', width, '', REPORT_SHOW_CELL)]
+    ['Occupied rooms', at('totalOccupied')],
+    ['Available rooms', '=IF(B3="","",A3-B3-D3)'],
+    ['Out of service', at('totalOutOfService')],
+    ['Walk-in (PCE) admitted', at('src:' + Calc.SOURCES[0])],
+    ['Admitted', at('admitted')],
+    ['Discharged', at('discharged')],
+    ['Patients in house', at('inHousePatients')],
+    ['In-house rooms occupied', at('inHouseOccupied')],
+    ['In-house rooms available', at('inHouseAvailable')],
+    ['Patients sharing a room', at('sharing')],
+    ['In-house occupancy', at('inHouseOccupancy')]
   ];
   sh.getRange(2, 1, 2, width).clear();
   sh.getRange(2, 1, 1, summary.length).setValues([summary.map(function (s) { return s[0]; })])
